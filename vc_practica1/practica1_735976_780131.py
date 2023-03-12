@@ -65,25 +65,32 @@ def poster(img, k, more_precission):
         old_centroids = np.zeros(shape=centroids.shape)
 
         if (not more_precission):
+            # Asignar cada punto al grupo más centroide
             distances = np.sqrt(((img_array - centroids[:, np.newaxis])**2).sum(axis=2))
             labels = np.argmin(distances, axis=0)
+            # Terminar cuando ya no se desplace ningún centroide
             while (centroids != old_centroids).all():
                 old_centroids = centroids.copy()
+                # Actualizar la posición de los centros según la posición de sus píxeles asignados
                 for i in range(k):
                     cluster_points = img_array[labels == i]
                     if len(cluster_points) > 0:
                         centroids[i] = cluster_points.mean(axis=0)
+            # Crear la imagen final asignando a cada punto de la imagen original su nuevo color
             distances = np.sqrt(((img_array - centroids[:, np.newaxis])**2).sum(axis=2))
             labels = np.argmin(distances, axis=0)
         else:
+            # Terminar cuando ya no se desplace ningún centroide
             while (centroids != old_centroids).all():
                 distances = np.sqrt(((img_array - centroids[:, np.newaxis])**2).sum(axis=2))
                 labels    = np.argmin(distances, axis=0)
                 old_centroids = centroids.copy()
+                # Actualizar la posición de los centroides según la posición de sus píxeles asignados
                 for i in range(k):
                     cluster_points = img_array[labels == i]
                     if len(cluster_points) > 0:
                         centroids[i] = cluster_points.mean(axis=0)
+            # Crear la imagen final asignando a cada punto de la imagen original su nuevo color
             distances = np.sqrt(((img_array - centroids[:, np.newaxis])**2).sum(axis=2))
             labels = np.argmin(distances, axis=0)
             centroids = centroids.astype(np.uint8)
