@@ -16,6 +16,9 @@ def contrast_and_brightness(img, a, b):
     img_c = img.astype(int).copy()
     return np.clip(a*img_c + b, 0, 255).astype(np.uint8)
 
+# https://stackoverflow.com/questions/31998428/opencv-python-equalizehist-colored-image
+# https://stackoverflow.com/questions/15007304/histogram-equalization-not-working-on-color-image-opencv
+# https://stackoverflow.com/questions/42651595/histogram-equalization-python-for-colored-image
 def histogram_equalization(img):
     img = cv.cvtColor(img, cv.COLOR_BGR2YCrCb)
     y, cr, cb = cv.split(img)
@@ -216,7 +219,6 @@ def reset_values():
 
 button_reset = tk.Button(options_canvas, text="Reiniciar", command=reset_values)
 options_canvas.create_window(265, 20, anchor=tk.NW, window=button_reset)
-
 
 def disable_option(n):
     if (n == 1):
