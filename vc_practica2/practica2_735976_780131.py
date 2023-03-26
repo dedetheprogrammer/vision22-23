@@ -235,14 +235,14 @@ def update_view():
             conf_label(sources[3], blank)
 
         if (smod_preview.get()):
-            conf_label(sources[4], resize_frame(clip(mod),1))
+            conf_label(sources[4], resize_frame(clip(mod),0.35))
         else:
             conf_label(sources[4], blank)
         # Output image:
         if (cmod_preview.get()):
             mod, rad = Canny(frame, 0.05, 0.06)
             fuga_canny = Hough_transform(mod, rad, 100)
-            conf_label(sources[5], resize_frame(clip(mod),1))
+            conf_label(sources[5], resize_frame(clip(mod),0.35))
             cv.line(frame, (fuga_canny[0], fuga_canny[1]-10), (fuga_canny[0], fuga_canny[1]+10), (255,0,255), 2)
             cv.line(frame, (fuga_canny[0]-10, fuga_canny[1]), (fuga_canny[0]+10, fuga_canny[1]), (255,0,255), 2)
         else:
