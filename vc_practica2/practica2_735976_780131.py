@@ -140,7 +140,6 @@ def use_camera():
 # GUI
 # - The window:
 root = tk.Tk()
-root.resizable(False, False) 
 root.title('Practica 2')
 camera_views = pack_frame(root, tk.RIGHT, tk.BOTH, True)
 using_camera = True
