@@ -81,10 +81,10 @@ def Canny(frame, low_threshold_ratio = 0.05, high_threshold_ratio = 0.09):
 # https://opencv24-python-tutorials.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghlines/py_houghlines.html
 def Hough_transform(gradient, orientation, threshold):
 
-    M,N = gradient.shape; CM = int(M/2); CN = int(N/2)
-    horizon = np.zeros(N)
-    for i in range(M-1):
-        for j in range(N-1):
+    N,M = gradient.shape; CM = int(M/2); CN = int(N/2)
+    horizon = np.zeros(M)
+    for i in range(N-1):
+        for j in range(M-1):
             if (gradient[i,j] >= threshold):
                 # Transformamos las coordenadas para que esten en el centro de 
                 # la imagen:
