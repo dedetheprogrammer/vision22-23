@@ -97,11 +97,6 @@ def Hough_transform(gradient, orientation, threshold):
                     horizon[x + CN] += 1
 
     return [np.argmax(horizon), CN]
-                  
-#frame = cv.imread('Contornos/poster.pgm')
-frame     = cv.imread('Contornos/pasillo1.pgm')
-#frame     = cv.imread('Contornos/pasillo2.pgm')
-#frame     = cv.imread('Contornos/pasillo3.pgm')
 
 def pack_frame(root, side, fill, expand):
     new_frame = tk.Frame(root)
@@ -178,6 +173,7 @@ options_canvas.create_window(90, 80, anchor=tk.NW, window=btn_1)
 
 gX_preview   = tk.BooleanVar()
 gY_preview   = tk.BooleanVar()
+g_XY_preview   = tk.BooleanVar()
 rad_preview  = tk.BooleanVar()
 smod_preview = tk.BooleanVar()
 cmod_preview = tk.BooleanVar()
@@ -186,12 +182,14 @@ checkbox_gX_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en X
 options_canvas.create_window(90, 140, anchor=tk.NW, window=checkbox_gX_preview)
 checkbox_gY_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en Y", variable=gY_preview)
 options_canvas.create_window(90, 200, anchor=tk.NW, window=checkbox_gY_preview)
+checkbox_gY_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en XY", variable=g_XY_preview)
+options_canvas.create_window(90, 260, anchor=tk.NW, window=checkbox_gY_preview)
 checkbox_rad_preview = tk.Checkbutton(root, text="Habilitar vista: orientación", variable=rad_preview)
-options_canvas.create_window(90, 260, anchor=tk.NW, window=checkbox_rad_preview)
+options_canvas.create_window(90, 320, anchor=tk.NW, window=checkbox_rad_preview)
 checkbox_smod_preview = tk.Checkbutton(root, text="Habilitar vista: modulo de Sobel", variable=smod_preview)
-options_canvas.create_window(90, 320, anchor=tk.NW, window=checkbox_smod_preview)
+options_canvas.create_window(90, 380, anchor=tk.NW, window=checkbox_smod_preview)
 checkbox_cmod_preview = tk.Checkbutton(root, text="Habilitar modulo de Canny", variable=cmod_preview)
-options_canvas.create_window(90, 380, anchor=tk.NW, window=checkbox_cmod_preview)
+options_canvas.create_window(90, 440, anchor=tk.NW, window=checkbox_cmod_preview)
 
 cam   = cv.VideoCapture(0)
 frame = cam.read()[1]; path_image = None
@@ -213,16 +211,21 @@ def update_view():
         source = cv.cvtColor(resize_frame(frame, 0.35), cv.COLOR_BGR2RGB,1)
         conf_label(sources[0], source)
 
-        gX, gY, _, mod, rad = Sobel_Scharr(frame)
+        gX, gY, gXY, mod, rad = Sobel_Scharr(frame)
         fuga_sobel = Hough_transform(mod, rad, 255)
 
         if (gX_preview.get()):
-            conf_label(sources[1], resize_frame(clip(gX/2+128),0.35))
+            conf_label(sources[0], resize_frame(clip(gX/2+128),0.35))
+        else:
+            conf_label(sources[0], blank)
+
+        if (gY_preview.get()):
+            conf_label(sources[1], resize_frame(clip(gY/2+128),0.35))
         else:
             conf_label(sources[1], blank)
 
-        if (gY_preview.get()):
-            conf_label(sources[2], resize_frame(clip(gY/2+128),0.35))
+        if (g_XY_preview.get()):
+            conf_label(sources[2], resize_frame(clip(gXY/2+128),0.35))
         else:
             conf_label(sources[2], blank)
 
@@ -232,14 +235,14 @@ def update_view():
             conf_label(sources[3], blank)
 
         if (smod_preview.get()):
-            conf_label(sources[4], resize_frame(clip(mod),0.35))
+            conf_label(sources[4], resize_frame(clip(mod),1))
         else:
             conf_label(sources[4], blank)
         # Output image:
         if (cmod_preview.get()):
             mod, rad = Canny(frame, 0.05, 0.06)
             fuga_canny = Hough_transform(mod, rad, 100)
-            conf_label(sources[5], resize_frame(clip(mod),0.35))
+            conf_label(sources[5], resize_frame(clip(mod),1))
             cv.line(frame, (fuga_canny[0], fuga_canny[1]-10), (fuga_canny[0], fuga_canny[1]+10), (255,0,255), 2)
             cv.line(frame, (fuga_canny[0]-10, fuga_canny[1]), (fuga_canny[0]+10, fuga_canny[1]), (255,0,255), 2)
         else:
