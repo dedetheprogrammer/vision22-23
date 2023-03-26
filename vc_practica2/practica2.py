@@ -22,29 +22,29 @@ def Canny(frame, low_threshold_ratio = 0.05, high_threshold_ratio = 0.09):
 
     # Supresion de no maximos
     res = np.zeros(mod.shape, dtype=np.int32)
-    ori     = mod * 180. / np.pi
-    ori[ori < 0] += 180
+    ori_dgr = ori * 180. / np.pi
+    ori_dgr[ori_dgr < 0] += 180
     q = np.where(
-        (0 <= ori) & (ori < 22.5) | (157.5 <= ori) & (ori <= 180),
+        (0 <= ori_dgr) & (ori_dgr < 22.5) | (157.5 <= ori_dgr) & (ori_dgr <= 180),
         np.roll(mod, shift=-1, axis=1),                 # q = mod[i, j+1]
         np.where(
-            (22.5 <= ori) & (ori < 67.5),
+            (22.5 <= ori_dgr) & (ori_dgr < 67.5),
             np.roll(mod, shift=(1, -1), axis=(0, 1)),   # q = mod[i+1, j-1]
             np.where(
-                (67.5 <= ori) & (ori < 112.5),
+                (67.5 <= ori_dgr) & (ori_dgr < 112.5),
                 np.roll(mod, shift=-1, axis=0),         # q = mod[i+1, j]
                 np.roll(mod, shift=(1,1), axis=(0,1))   # q = mod[i+1, j+1]
             )
         )
     )
     r = np.where(
-        (0 <= ori) & (ori < 22.5) | (157.5 <= ori) & (ori <= 180),
+        (0 <= ori_dgr) & (ori_dgr < 22.5) | (157.5 <= ori_dgr) & (ori_dgr <= 180),
         np.roll(mod, shift=1, axis=1),                  # r = mod[i, j-1]
         np.where(
-            (22.5 <= ori) & (ori < 67.5),
+            (22.5 <= ori_dgr) & (ori_dgr < 67.5),
             np.roll(mod, shift=(-1,1), axis=(0,1)),     # r = mod[i-1, j+1]
             np.where(
-                (67.5 <= ori) & (ori < 112.5),
+                (67.5 <= ori_dgr) & (ori_dgr < 112.5),
                 np.roll(mod, shift=1, axis=0),          # r = mod[i-1, j]
                 np.roll(mod, shift=(-1,-1), axis=(0,1)) # r = mod[i-1, j-1]
             )
@@ -75,64 +75,61 @@ def Canny(frame, low_threshold_ratio = 0.05, high_threshold_ratio = 0.09):
     #                    res[i, j] = 0
     #            except IndexError as e:
     #                pass
-    return res, mod, ori*np.pi/180
+    return res, ori
 
 # https://opencv24-python-tutorials.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghlines/py_houghlines.html
-def Hough_transform(frame, mod, ori, threshold):
-    if (frame.shape[0] % 2 == 0):
-        mid = [int(frame.shape[0]/2)-1, int(frame.shape[0]/2)]
-    else:
-        mid = [int(frame.shape[0]/2)]
+def Hough_transform(gradient, orientation, threshold):
 
-    M,N = frame.shape
-    votes = {}
-    for i in range(0, M-1):
-        for j in range(0, N-1):
-            if (mod[i, j] >= threshold):
-                x = j - N/2
-                y = M/2 - i
-                theta = ori[i, j]
+    M,N = gradient.shape; CM = int(M/2); CN = int(N/2)
+    horizon = np.zeros(N)
+    for i in range(M-1):
+        for j in range(N-1):
+            if (gradient[i,j] >= threshold):
+                # Transformamos las coordenadas para que esten en el centro de 
+                # la imagen:
+                x = j - CN; y = CM - i
+                # Calculamos las coordenadas polares:
+                theta = orientation[i,j]
                 rho   = x*np.cos(theta) + y*np.sin(theta)
-                if (theta, rho) in votes:
-                    print("hila")
-                    votes[(theta, rho)] += 1
-                else:
-                    votes[(theta, rho)] = 1
+                # Coordenadas polares del horizonte: (pi/2, N/2)
+                if ((theta - np.pi/2) < 1e-6 and (rho - CN) < 1e-6):
+                    horizon[x + CN] += 1
 
-    for line in votes:
-        #theta, rho = max(votes.items(), key=lambda x:x[1])[0]
-        theta, rho = line
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a*rho - N/2
-        y0 = M/2 - b*rho
-        x1 = int(x0 - 1000*b)
-        y1 = int(y0 + 1000*a)
-        x2 = int(x0 + 1000*b)
-        y2 = int(y0 - 1000*a)
-        cv.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    return frame
-                       
-frame = cv.imread('Contornos/poster.pgm')
-#frame = cv.imread('Contornos/pasillo1.pgm')
-#frame = cv.imread('Contornos/pasillo2.pgm')
-#frame = cv.imread('Contornos/pasillo3.pgm')
+    return [np.argmax(horizon), CN]
+                  
+#frame = cv.imread('Contornos/poster.pgm')
+frame     = cv.imread('Contornos/pasillo1.pgm')
+#frame     = cv.imread('Contornos/pasillo2.pgm')
+#frame     = cv.imread('Contornos/pasillo3.pgm')
+frame_aux = frame.copy()
 
 #cam = cv.VideoCapture(0)
 #while True:
-    #check, frame = cam.read()
-    #frame = cv.flip(frame,1)
-cv.imshow('Source', frame)
+#    check, frame = cam.read()
+#    frame = cv.flip(frame,1)
+#    frame_aux = frame.copy()
+#    cv.imshow('Source', frame)
 #gX, gY, gXY, mod, ori = Sobel_Scharr(frame)
 #cv.imshow('GX', clip(gX/2 + 128))
 #cv.imshow('GY', clip(gY/2 + 128))
 #cv.imshow('GXGY', clip(gXY/2 + 128))
 #cv.imshow('Mod', clip(mod))
 #cv.imshow('Orientacion', np.uint8(ori/np.pi * 128))
-frame, mod, ori = Canny(frame, 0.05, 0.085)
-cv.imshow("Canny", np.uint8(frame))
-frame = Hough_transform(frame, mod, ori, 255)
+
+_,_,_, mod, ori = Sobel_Scharr(frame)
+cv.imshow("Gradiente de Sobel", np.uint8(mod))
+fuga = Hough_transform(mod, ori, 255)
+cv.line(frame, (fuga[0], fuga[1]-10), (fuga[0], fuga[1]+10), (255,0,0), 2)
+cv.line(frame, (fuga[0]-10, fuga[1]), (fuga[0]+10, fuga[1]), (255,0,0), 2)
 cv.imshow("Hough", np.uint8(frame))
+
+mod, ori = Canny(frame_aux, 0.05, 0.06)
+cv.imshow("Gradiente de Canny", np.uint8(mod))
+fuga = Hough_transform(mod, ori, 100)
+cv.line(frame, (fuga[0], fuga[1]-10), (fuga[0], fuga[1]+10), (255,0,255), 2)
+cv.line(frame, (fuga[0]-10, fuga[1]), (fuga[0]+10, fuga[1]), (255,0,255), 2)
+cv.imshow("Hough", np.uint8(frame))
+
 key = cv.waitKey(0)
-#if key == 27:
-#    break
+    #if key == 27:
+    #    break
