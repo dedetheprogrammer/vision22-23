@@ -1,5 +1,7 @@
 import cv2 as cv
 import numpy as np
+
+nfeatures = 10
 # https://www.geeksforgeeks.org/feature-detection-and-matching-with-opencv-python/
 # https://docs.opencv.org/4.x/dc/dc3/tutorial_py_matcher.html
 def HARRIS(img):
@@ -16,8 +18,8 @@ def HARRIS(img):
 def SIFT(img):
     grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     sift      = cv.SIFT_create()
-    kp        = sift.detect(grayscale, None)
-    return cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    kp, des   = sift.detectAndCompute(grayscale, None)
+    return kp, des, cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
 # https://www.geeksforgeeks.org/feature-matching-using-orb-algorithm-in-python-opencv/
 def ORB(img):
@@ -40,13 +42,16 @@ def BRUTE_MATCH(fst, snd, operator):
         HARRIS(snd)
         return []
     elif (operator == 'Sift'):
-        SIFT(fst)
-        SIFT(snd)
-        return []
+        fst_kp, fst_des, _ = SIFT(fst)
+        snd_kp, snd_des, _ = SIFT(snd)
+        bf      = cv.BFMatcher()
+        matches = bf.match(fst_des, snd_des)
+        matches = sorted(matches, key = lambda x:x.distance)
+        return cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:10], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     elif (operator == 'Orb'):
         fst_kp, fst_des, _ = ORB(fst)
         snd_kp, snd_des, _ = ORB(snd)
-        bf      = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+        bf      = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
         matches = bf.match(fst_des, snd_des)
         matches = sorted(matches, key = lambda x:x.distance)
         return cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:10], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
@@ -58,7 +63,7 @@ def BRUTE_MATCH(fst, snd, operator):
 fst = cv.imread('./BuildingScene/building1.JPG')
 snd = cv.imread('./BuildingScene/building2.JPG')
 cv.namedWindow('Practica 4', cv.WINDOW_AUTOSIZE)
-cv.imshow('Practica 4', BRUTE_MATCH(fst, snd, 'Orb'))
+cv.imshow('Practica 4', BRUTE_MATCH(fst, snd, 'Sift'))
 cv.waitKey(0)
 
 # while 1:
