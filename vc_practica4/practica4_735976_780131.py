@@ -1,118 +1,170 @@
-from PIL import Image, ImageTk
 import cv2 as cv
 import numpy as np
 import time
 
-def harris():
-    nfeatures = 50
-    img1 = cv.imread("BuildingScene/building1.JPG")
-    img2 = cv.imread("BuildingScene/building2.JPG")
-    gray1  = cv.cvtColor(img1, cv.COLOR_BGR2GRAY)
-    gray2  = cv.cvtColor(img2, cv.COLOR_BGR2GRAY)
+nfeatures = 10
+# https://www.geeksforgeeks.org/feature-detection-and-matching-with-opencv-python/
+# https://docs.opencv.org/4.x/dc/dc3/tutorial_py_matcher.html
+def HARRIS(img):
+    grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    grayscale = np.float32(grayscale)
+    harris    = cv.cornerHarris(grayscale, blockSize=2, ksize=3, k=0.04)
+    # Result is dilated for marking the corners, not important
+    harris    = cv.dilate(harris, None)
+    # Threshold for an optimal value, it may vary depending on the image.
+    img[harris > 0.01 * harris.max()] = [0,255,0]
+    return img
 
-    sift = cv.SIFT_create()
-    
-    # Inicio de detección
-    inicio_deteccion = time.time()
-    gray1 = np.float32(gray1)
-    dst = cv.cornerHarris(gray1,2,3,0.04)
-    dst_norm = np.empty_like(dst)
-    cv.normalize(dst, dst_norm, alpha=0, beta=255, norm_type=cv.NORM_MINMAX, dtype=cv.CV_8U)
-    img1_aux = img1.copy()
-    img1_aux[dst>0.01*dst.max()]=[0,0,255]
-    kp1 = [cv.KeyPoint(x, y, nfeatures) for y in range(dst_norm.shape[0]) for x in range(dst_norm.shape[1]) if np.array_equal(img1_aux[y, x], [0, 0, 255])]
-    des1 = sift.compute(img1, kp1)[1]
+# https://docs.opencv.org/4.x/da/df5/tutorial_py_sift_intro.html
+def SIFT(img):
+    grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    sift      = cv.SIFT_create()
+    kp, des   = sift.detectAndCompute(grayscale, None)
+    return kp, des, cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-    gray2 = np.float32(gray2)
-    dst = cv.cornerHarris(gray2,2,3,0.04)
-    dst_norm = np.empty_like(dst)
-    cv.normalize(dst, dst_norm, alpha=0, beta=255, norm_type=cv.NORM_MINMAX, dtype=cv.CV_8U)
-    img2_aux = img2.copy()
-    img2_aux[dst>0.01*dst.max()]=[0,0,255]
-    kp2 = [cv.KeyPoint(x, y, nfeatures) for y in range(dst_norm.shape[0]) for x in range(dst_norm.shape[1]) if np.array_equal(img2_aux[y, x], [0, 0, 255])]
-    # Fin de detección
-    t_deteccion = time.time() - inicio_deteccion
-    
-    des1 = sift.compute(img1, kp1)[1]
-    des2 = sift.compute(img2, kp2)[1]
-    
-    
+# https://www.geeksforgeeks.org/feature-matching-using-orb-algorithm-in-python-opencv/
+def ORB(img):
+    grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    orb       = cv.ORB_create()
+    kp, des   = orb.detectAndCompute(grayscale, None)
+    return kp, des, cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-    inicio_emparejamiento = time.time()
+# https://docs.opencv.org/4.x/db/d70/tutorial_akaze_matching.html
+def AKAZE(img):
+    grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    akaze     = cv.AKAZE_create()
+    kp, des   = akaze.detectAndCompute(grayscale, None)
+    return kp, des, cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+def matching(fst, fst_kp, fst_des, snd, snd_kp, snd_des, mode = 'Brute force'):
     bf = cv.BFMatcher()
-    matches = bf.match(des1, des2)
+    if (mode == 'Brute force'):
+        matches = bf.match(fst_des, snd_des)
+        matches = sorted(matches, key = lambda x:x.distance)
+        return matches, cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:200], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    elif (mode == 'KNN'):
+        matches = bf.knnMatch(fst_des, snd_des, k=2)
+        good = []
+        for m,n in matches:
+            if m.distance < 0.75*n.distance:
+                good.append([m])
+        return matches, cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, good, None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    elif (mode == 'FLANN'):
+        # FLANN parameters:
+        FLANN_INDEX_KDTREE = 1
+        index_params       = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params      = dict(checks=50)
+        flann              = cv.FlannBasedMatcher(index_params, search_params)
+        matches            = flann.knnMatch(fst_des, snd_des, k=2)
+        # Need to draw only good matches, then have to create a mask
+        matchesMask        = [[0,0] for i in range(len(matches))]
+        # Ratio test as per Lowe's paper
+        for i,(m,n) in enumerate(matches):
+            if m.distance < 0.7*n.distance:
+                matchesMask[i]=[1,0]
+        return matches, cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, matches, None, matchColor=(0,255,0), singlePointColor=(255,0,0), matchesMask=matchesMask, flags=cv.DrawMatchesFlags_DEFAULT)
 
-    matches = sorted(matches, key = lambda x:x.distance)
-    good_matches = []
-    ratio_threshold = 1
-    for match in matches:
-        # Obtener las dos distancias más cercanas para este match
-        distances = [m.distance for m in matches]
-        distances.sort()
-        if distances[0] / distances[1] < ratio_threshold:
-            # El match es válido, añadirlo a la lista de matches buenos
-            good_matches.append(match)
+# Cambiar lo que devuelven los operadores:
+def FeaturesMatching(fst, snd, operator, mode = 'Brute force'):
+    if (operator == 'Harris'):
+        # Detection
+        inicio_deteccion = time.time()
+        fst_output = HARRIS(fst)
+        snd_output = HARRIS(snd)
+        t_deteccion = time.time() - inicio_deteccion
+
+        # Log output
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: -')
+        print(f'Caracteristicas detectadas en imagen 2: -')
+        print(f'Número de emparejamientos: -')
+        print(f'Tiempo de detección con Harris: {t_deteccion:.4f} segundos')
+        print(f'Tiempo de emparejamiento: - ')
+        print('========================================================')
+        return cv.hconcat([fst_output, snd_output])
     
-    t_emparejamiento = time.time() - inicio_emparejamiento
+    elif (operator == 'Sift'):
+        # Detection
+        inicio_deteccion = time.time()
+        fst_kp, fst_des, _ = SIFT(fst)
+        snd_kp, snd_des, _ = SIFT(snd)
+        t_deteccion = time.time() - inicio_deteccion
 
-    print(f'Característica detectadas en imagen 1: {len(kp1)}')
-    print(f'Característica detectadas en imagen 2: {len(kp2)}')
-    print(f'Número de emparejamientos: {len(matches)}')
-    print(f'Tiempo de detección con ORB: {t_deteccion:.4f} segundos')
-    print(f'Tiempo de emparejamiento por fuerza bruta: {t_emparejamiento:.4f} segundos')
-    # Dibujar los emparejamientos encontrados
-    img_matches = cv.drawMatches(img1, kp1, img2, kp2, good_matches[:nfeatures], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+        # Matching
+        inicio_emparejamiento = time.time()
+        matches, output = matching(fst, fst_kp, fst_des, snd, snd_kp, snd_des, mode)
+        t_emparejamiento = time.time() - inicio_emparejamiento
 
-    # Mostrar las imágenes con los emparejamientos
-    cv.imshow("Matches", img_matches)
-
-    if cv.waitKey(0) & 0xff == 27:
-        cv.destroyAllWindows()
-
-def orb():
+        # Log output
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Número de emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección con Sift: {t_deteccion:.4f} segundos')
+        print(f'Tiempo de emparejamiento con {mode}: {t_emparejamiento:.4f} segundos')
+        print('========================================================')
+        return output
     
-    nfeatures = 50
-    img1 = cv.imread("BuildingScene/building1.JPG", cv.IMREAD_GRAYSCALE)
-    img2 = cv.imread("BuildingScene/building2.JPG", cv.IMREAD_GRAYSCALE)
+    elif (operator == 'Orb'):
+        # Detection
+        inicio_deteccion = time.time()
+        fst_kp, fst_des, _ = ORB(fst)
+        snd_kp, snd_des, _ = ORB(snd)
+        t_deteccion = time.time() - inicio_deteccion
+
+        # Matching
+        inicio_emparejamiento = time.time()
+        matches, output = matching(fst, fst_kp, fst_des, snd, snd_kp, snd_des, mode)
+        t_emparejamiento = time.time() - inicio_emparejamiento
+
+        # Log output
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Número de emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección con Orb: {t_deteccion:.4f} segundos')
+        print(f'Tiempo de emparejamiento con {mode}: {t_emparejamiento:.4f} segundos')
+        print('========================================================')
+        return output
     
-    # Initiate ORB detector
-    orb = cv.ORB_create(nfeatures=nfeatures)
+    elif (operator == 'Akaze'):
+        # Detection
+        inicio_deteccion = time.time()
+        fst_kp, fst_des, _ = AKAZE(fst)
+        snd_kp, snd_des, _ = AKAZE(snd)
+        t_deteccion = time.time() - inicio_deteccion
+
+        # Matching
+        inicio_emparejamiento = time.time()
+        matches, output = matching(fst, fst_kp, fst_des, snd, snd_kp, snd_des, mode)
+        t_emparejamiento = time.time() - inicio_emparejamiento
+
+        # Log output
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Número de emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección con Akaze: {t_deteccion:.4f} segundos')
+        print(f'Tiempo de emparejamiento con {mode}: {t_emparejamiento:.4f} segundos')
+        print('========================================================')
+        return output
     
-    inicio_deteccion = time.time()
-    kp1, des1 = orb.detectAndCompute(img1,None)
-    kp2, des2 = orb.detectAndCompute(img2,None)
-    t_deteccion = time.time() - inicio_deteccion
+fst = cv.imread('./BuildingScene/building1.JPG')
+snd = cv.imread('./BuildingScene/building2.JPG')
+#cv.namedWindow('Practica 4', cv.WINDOW_AUTOSIZE)
+cv.imshow('0', FeaturesMatching(fst, snd, 'Harris'))
+cv.imshow('1', FeaturesMatching(fst, snd, 'Sift'))
+cv.imshow('2', FeaturesMatching(fst, snd, 'Sift', 'KNN'))
+cv.imshow('3', FeaturesMatching(fst, snd, 'Sift', 'FLANN'))
+cv.imshow('4', FeaturesMatching(fst, snd, 'Orb'))
+cv.imshow('5', FeaturesMatching(fst, snd, 'Orb', 'KNN'))
+cv.imshow('7', FeaturesMatching(fst, snd, 'Akaze'))
+cv.imshow('8', FeaturesMatching(fst, snd, 'Akaze', 'KNN'))
 
-    inicio_emparejamiento = time.time()
-    bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
-    # Match descriptors.
-    matches = bf.match(des1,des2)
+cv.waitKey(0)
 
-    matches = sorted(matches, key = lambda x:x.distance)
-    good_matches = []
-    ratio_threshold = 0.84
-    for match in matches:
-        # Obtener las dos distancias más cercanas para este match
-        distances = [m.distance for m in matches]
-        distances.sort()
-        if distances[0] / distances[1] < ratio_threshold:
-            # El match es válido, añadirlo a la lista de matches buenos
-            good_matches.append(match)
-    t_emparejamiento = time.time() - inicio_emparejamiento
-
-    print(f'Característica detectadas en imagen 1: {len(kp1)}')
-    print(f'Característica detectadas en imagen 2: {len(kp2)}')
-    print(f'Número de emparejamientos: {len(matches)}')
-    print(f'Tiempo de detección con ORB: {t_deteccion:.4f} segundos')
-    print(f'Tiempo de emparejamiento por fuerza bruta: {t_emparejamiento:.4f} segundos')
-    # Dibujar los emparejamientos encontrados
-    img_matches = cv.drawMatches(img1, kp1, img2, kp2, matches[:nfeatures], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-    #img_matches2 = cv.drawMatches(img1, kp1, img2, kp2, good_matches[:nfeatures], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-
-    # Mostrar las imágenes con los emparejamientos
-    cv.imshow("Matches", img_matches)
-    #cv.imshow("Matches 2", img_matches2)
-    if cv.waitKey(0) & 0xff == 27:
-        cv.destroyAllWindows()
-
-harris()
+# while 1:
+#     cv.imshow('Practica 4', Harris(img))
+#     if cv.waitKey(0) == 27:
+#         break
+cv.destroyWindow('Practica 4')
