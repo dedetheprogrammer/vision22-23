@@ -33,6 +33,7 @@ def harris():
     # Fin de detección
     t_deteccion = time.time() - inicio_deteccion
     
+    des1 = sift.compute(img1, kp1)[1]
     des2 = sift.compute(img2, kp2)[1]
     
     
