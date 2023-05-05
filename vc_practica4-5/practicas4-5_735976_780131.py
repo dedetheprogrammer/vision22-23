@@ -1,4 +1,5 @@
 import cv2 as cv
+import math
 import numpy as np
 import time
 
@@ -48,54 +49,30 @@ def AKAZE(img, get_output):
     else:
         return kp, des, None
 
-def matching(fst, fst_kp, fst_des, snd, snd_kp, snd_des, mode = 'Brute force'):
-    bf = cv.BFMatcher()
-    if (mode == 'Brute force'):
-        matches = bf.match(fst_des, snd_des)
-        matches = sorted(matches, key = lambda x:x.distance)
-        return matches, cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:200], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-    elif (mode == 'KNN'):
-        matches = bf.knnMatch(fst_des, snd_des, k=2)
-        good = []
-        for m,n in matches:
-            if m.distance < 0.75*n.distance:
-                good.append([m])
-        return matches, cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, good, None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-    elif (mode == 'FLANN'):
-        # FLANN parameters:
-        FLANN_INDEX_KDTREE = 1
-        index_params       = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-        search_params      = dict(checks=50)
-        flann              = cv.FlannBasedMatcher(index_params, search_params)
-        matches            = flann.knnMatch(fst_des, snd_des, k=2)
-        # Need to draw only good matches, then have to create a mask
-        matchesMask        = [[0,0] for i in range(len(matches))]
-        # Ratio test as per Lowe's paper
-        for i,(m,n) in enumerate(matches):
-            if m.distance < 0.7*n.distance:
-                matchesMask[i]=[1,0]
-        return matches, cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, matches, None, matchColor=(0,255,0), singlePointColor=(255,0,0), matchesMask=matchesMask, flags=cv.DrawMatchesFlags_DEFAULT)
-
 #------------------------------------------------------------------------------
 # Features matching matchers:
-def BRUTE_FORCE_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, k=200):
+def BRUTE_FORCE_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, ratio=200):
     bf      = cv.BFMatcher()
     matches = bf.match(fst_des, snd_des)
     matches = sorted(matches, key= lambda x:x.distance)
     if get_output:
-        return matches[:k], cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:200], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+        return matches[:ratio], cv.drawMatches(fst, fst_kp, snd, snd_kp, matches[:200], None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     else:
-        return matches[:k], None
+        return matches[:ratio], None
 
-def KNN_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, k=2, threshold=0.75):
+def KNN_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, k=2, ratio=0.75):
     bf      = cv.BFMatcher()
     matches = bf.knnMatch(fst_des, snd_des, k=2)
     good    = []
     for m,n in matches:
-        if m.distance < threshold*n.distance:
+        if m.distance < ratio*n.distance:
             good.append(m)
     if get_output:
-        return np.asarray(good), cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, good, None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+        draw_params = dict(matchColor = (0,255,0),
+                   singlePointColor = (255,0,0),
+                   matchesMask = None,
+                   flags = cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        return np.asarray(good), cv.drawMatches(fst, fst_kp, snd, snd_kp, good, None, **draw_params)
     else:
         return np.asarray(good), None
 
@@ -110,7 +87,11 @@ def FLANN_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, FLANN_IN
             good.append(m)
     if get_output:
         matchesMask = [[0,0] for i in range(len(matches))]
-        return np.asarray(good), cv.drawMatchesKnn(fst, fst_kp, snd, snd_kp, matches, None, matchColor=(0,255,0), singlePointColor=(255,0,0), matchesMask=matchesMask, flags=cv.DrawMatchesFlags_DEFAULT)
+        draw_params = dict(matchColor = (0,255,0),
+                   singlePointColor = (255,0,0),
+                   matchesMask = None,
+                   flags = cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        return np.asarray(good), cv.drawMatches(fst, fst_kp, snd, snd_kp, good, None, **draw_params)
     else:
         return np.asarray(good), None
 
@@ -237,52 +218,70 @@ def crop(panorama):
     return panorama[y:y+h, x:x+w]
 
 # Cambiar lo que devuelven los operadores:
-def ImageStitching(fst, snd, md, feature_matcher, get_output = False):
+def ImageStitching(fst, snd, md, feature_matcher, ratio, get_output = False):
 
-    # 1. Detection
-    td0 = time.time()
-    fst_kp, fst_des, fst_kp_img = md(fst, get_output)
-    snd_kp, snd_des, snd_kp_img = md(snd, get_output)
-    td1 = time.time() - td0
+    if md.__name__ == 'HARRIS':
+        # 1. Detection
+        td0 = time.time()
+        fst_kp, fst_kp_img = md(fst, get_output)
+        snd_kp, snd_kp_img = md(snd, get_output)
+        td1 = time.time() - td0
+
+        # 2. Log output
+        print('========================================================')
+        print(f'Deteccion de esquinas con {md.__name__}')
+        print('========================================================')
+        print(f'Esquinas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Esquinas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Tiempo de detección: {td1:.4f} segundos')
+        print('========================================================')
+
+        return cv.hconcat([fst_kp_img, snd_kp_img]), None, None, None
     
-    # 2. Matching
-    tm0     = time.time()
-    matches, matching_img = feature_matcher(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output)
-    tm1     = time.time() - tm0
+    else:
+        # 1. Detection
+        td0 = time.time()
+        fst_kp, fst_des, fst_kp_img = md(fst, get_output=get_output)
+        snd_kp, snd_des, snd_kp_img = md(snd, get_output=get_output)
+        td1 = time.time() - td0
+        
+        # 2. Matching
+        tm0     = time.time()
+        matches, matching_img = feature_matcher(fst, fst_kp, fst_des, snd, snd_kp, snd_des, ratio=ratio, get_output=get_output)
+        tm1     = time.time() - tm0
 
-    # 3. Wrapping
-    src_pts = np.float32([fst_kp[match.queryIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
-    dst_pts = np.float32([snd_kp[match.trainIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
-    M, _ = cv.findHomography(dst_pts, src_pts, cv.RANSAC, 5.0)
-    
-    h1, w1 = fst.shape[:2]
-    h2, w2 = snd.shape[:2]
-    pts1 = np.float32([[0, 0], [0, h1], [w1, h1], [w1, 0]]).reshape(-1, 1, 2)
-    pts2 = np.float32([[0, 0], [0, h2], [w2, h2], [w2, 0]]).reshape(-1, 1, 2)
-    pts2_ = cv.perspectiveTransform(pts2, M)
-    pts = np.concatenate((pts1, pts2_), axis=0)
-    [xmin, ymin] = np.int32(pts.min(axis=0).ravel() - 0.5)
-    [xmax, ymax] = np.int32(pts.max(axis=0).ravel() + 0.5)
-    t = [-xmin, -ymin]
-    Ht = np.array([[1, 0, t[0]], [0, 1, t[1]], [0, 0, 1]])
+        # 3. Wrapping
+        src_pts = np.float32([fst_kp[match.queryIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
+        dst_pts = np.float32([snd_kp[match.trainIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
+        M, _ = cv.findHomography(dst_pts, src_pts, cv.RANSAC, 5.0)
+        
+        h1, w1 = fst.shape[:2]
+        h2, w2 = snd.shape[:2]
+        pts1 = np.float32([[0, 0], [0, h1], [w1, h1], [w1, 0]]).reshape(-1, 1, 2)
+        pts2 = np.float32([[0, 0], [0, h2], [w2, h2], [w2, 0]]).reshape(-1, 1, 2)
+        pts2_ = cv.perspectiveTransform(pts2, M)
+        pts = np.concatenate((pts1, pts2_), axis=0)
+        [xmin, ymin] = np.int32(pts.min(axis=0).ravel() - 0.5)
+        [xmax, ymax] = np.int32(pts.max(axis=0).ravel() + 0.5)
+        t = [-xmin, -ymin]
+        Ht = np.array([[1, 0, t[0]], [0, 1, t[1]], [0, 0, 1]])
 
-    # 4. Blending
-    aligned_img = cv.warpPerspective(snd, Ht.dot(M), (xmax - xmin, ymax - ymin))
-    mask = fst != 0
-    aligned_img[t[1]:h1 + t[1], t[0]:w1 + t[0]][mask] = fst[mask]
+        # 4. Blending
+        aligned_img = cv.warpPerspective(snd, Ht.dot(M), (xmax - xmin, ymax - ymin))
+        mask = fst != 0
+        aligned_img[t[1]:h1 + t[1], t[0]:w1 + t[0]][mask] = fst[mask]
 
-    # 5. Log output
-    print('========================================================')
-    print(f'Deteccion mediante {md.__name__} y matching mediante {feature_matcher.__name__}')
-    print('========================================================')
-    print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
-    print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
-    print(f'Número de buenos emparejamientos: {len(matches)}')
-    print(f'Tiempo de detección: {td1:.4f} segundos')
-    print(f'Tiempo de matching: {tm1:.4f} segundos')
-    print('========================================================')
-    # 6. Final crop
-    return crop(aligned_img), fst_kp_img, snd_kp_img, matching_img
+        # 5. Log output
+        print('========================================================')
+        print(f'Deteccion mediante {md.__name__} y matching mediante {feature_matcher.__name__}')
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Número de buenos emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección: {td1:.4f} segundos')
+        print(f'Tiempo de matching: {tm1:.4f} segundos')
+        print('========================================================')
+        # 6. Final crop
+        return crop(aligned_img), fst_kp_img, snd_kp_img, matching_img
 
 # No funciona :( (tampoco esta depurado)
 # Su objetivo era obtener el par con el mejor porcentaje de matching, pero 
@@ -398,19 +397,122 @@ def MultipleImageStitching(images, operator, matcher, threshold):
     print('========================================================')
     return res
 
-option = 0
+option = 1
 images = []
 if option == 0:
+    #for i in range(1,6):
+    #    images.append(cv.imread(f'./BuildingScene/building{i}.JPG'))  
+    #res,_,_,_ = ImageStitching(images[0], images[3], HARRIS, None, 0, True)
+    #cv.imshow("Building", res)
+    #cv.waitKey(0)
+
+    #res,fst,snd,match = ImageStitching(images[0], images[1], SIFT,  BRUTE_FORCE_MATCH, 200, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], ORB,   BRUTE_FORCE_MATCH, 200, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], AKAZE, BRUTE_FORCE_MATCH, 200, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], SIFT,  KNN_MATCH, 0.75, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], ORB,   KNN_MATCH, 0.75, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], AKAZE, KNN_MATCH, 0.75, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+#
+    #res,fst,snd,match = ImageStitching(images[0], images[1], SIFT,  FLANN_MATCH, 0.75, True)
+    #cv.imshow("Building", cv.hconcat([fst, snd]))
+    #cv.waitKey(0)
+    #cv.imshow("Building", match)
+    #cv.waitKey(0)
+
+    images = []
+    for i in range(1,8):
+        img = cv.imread(f'./BuildingScene/EINA{i}.jpg')
+        img = cv.resize(img, (int(math.ceil(img.shape[1] * 0.16)), int(math.ceil(img.shape[0] * 0.16))), interpolation=cv.INTER_AREA)
+        images.append(img)
+    for i in range(1,7):
+        images[i-1] = cv.resize(images[i-1], images[2].shape[:2], interpolation=cv.INTER_AREA)
+    # res,_,_,_ = ImageStitching(images[2], images[4], HARRIS, None, 0, True)
+    # res = cv.resize(res, (int(res.shape[1] * 0.2), int(res.shape[0] * 0.2)), interpolation=cv.INTER_AREA)
+    # cv.imshow("EINA", res)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], SIFT,  BRUTE_FORCE_MATCH, 200, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], ORB, BRUTE_FORCE_MATCH, 200, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], AKAZE, BRUTE_FORCE_MATCH, 200, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], SIFT, KNN_MATCH, 0.75, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], ORB, KNN_MATCH, 0.75, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], AKAZE, KNN_MATCH, 0.75, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+    res,fst,snd,match = ImageStitching(images[2], images[3], SIFT,  FLANN_MATCH, 0.75, True)
+    cv.imshow("Building", cv.hconcat([fst, snd]))
+    cv.waitKey(0)
+    cv.imshow("Building", match)
+    cv.waitKey(0)
+
+elif option == 1:
     for i in range(1,6):
         img  = cv.imread(f'./BuildingScene/building{i}.JPG')
         h, w = img.shape[:2]
         images.append(cylindricalWarp(img, np.array([[800,0,w/2],[0,800,h/2],[0,0,1]])))
     print('========================================================')
     t0  = time.time()
-    res1,_,_,_ = ImageStitching(images[0], images[1], AKAZE, BRUTE_FORCE_MATCH)
-    res2,_,_,_ = ImageStitching(images[3], images[4], AKAZE, BRUTE_FORCE_MATCH)
-    res3,_,_,_ = ImageStitching(images[2], res2, AKAZE, BRUTE_FORCE_MATCH)
-    res,_,_,_  = ImageStitching(res3, res1, AKAZE, BRUTE_FORCE_MATCH)
+    res1,_,_,_ = ImageStitching(images[0], images[1], AKAZE, KNN_MATCH, 0.75)
+    res2,_,_,_ = ImageStitching(images[3], images[4], AKAZE, KNN_MATCH, 0.75)
+    res3,_,_,_ = ImageStitching(images[2], res2, AKAZE, KNN_MATCH, 0.75)
+    res,_,_,_  = ImageStitching(res3, res1, AKAZE, KNN_MATCH, 0.75)
+    cv.imshow('Practica 5', histogram_equalization(res))
     t1  = time.time() - t0
     print('========================================================')
     print(f'Tiempo total: {t1} s')
@@ -423,16 +525,17 @@ else:
         images.append(cylindricalWarp(img, np.array([[800,0,w/2],[0,800,h/2],[0,0,1]])))
     print('========================================================')
     t0  = time.time()
-    res1,_,_,_ = ImageStitching(images[1], images[2], AKAZE, BRUTE_FORCE_MATCH)
-    res2,_,_,_ = ImageStitching(res1, images[3], AKAZE, BRUTE_FORCE_MATCH)
-    res3,_,_,_ = ImageStitching(res2, images[0], AKAZE, BRUTE_FORCE_MATCH)
-    res,_,_,_  = ImageStitching(res3, images[4], AKAZE, BRUTE_FORCE_MATCH)
+    res1,_,_,_ = ImageStitching(images[1], images[2], AKAZE, KNN_MATCH, 0.75)
+    res2,_,_,_ = ImageStitching(res1, images[3], AKAZE, KNN_MATCH, 0.75)
+    res3,_,_,_ = ImageStitching(res2, images[0], AKAZE, KNN_MATCH, 0.75)
+    res,_,_,_  = ImageStitching(res3, images[4], AKAZE, KNN_MATCH, 0.75)
     res = cv.resize(res, (int(res.shape[1] * 0.4), int(res.shape[0] * 0.4)), interpolation=cv.INTER_AREA)
+    cv.imshow('Practica 5', histogram_equalization(res))
 
     t1  = time.time() - t0
     print('========================================================')
     print(f'Tiempo total: {t1} s')
     print('========================================================')
 
-cv.imshow('Practica 5', histogram_equalization(res))
+
 cv.waitKey(0)
