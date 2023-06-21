@@ -147,10 +147,6 @@ def neon_borders(frame, sigma, threshold):
     _, mod = cv.threshold(np.sqrt(gX**2 + gY**2).astype(np.uint8), threshold, 255, cv.THRESH_BINARY)
     return cv.bitwise_and(frame, frame, mask=mod)
 
-
-a = True
-
-
 def rotate(frame, point, deg) :
 
     rad = math.radians(deg)
@@ -160,15 +156,19 @@ def rotate(frame, point, deg) :
     qx = px*math.cos(rad) - py*math.sin(rad) + origin[0]
     qy = px*math.sin(rad) + py*math.cos(rad) + origin[1]
 
-    print(origin, qx, qy)
-
-    m = (qy - origin[1]) / (qx - origin[0])
-    if(qx > origin[0]):
-        qx = frame.shape[1]
-        qy = origin[1] + m*(qx - origin[0])
+    if (qx == origin[0]):
+        if (qy < origin[1]):
+            qy = 0
+        else:
+            qy = frame.shape[0]
     else:
-        qx = 0
-        qy = origin[1] + m*(qx - origin[0])
+        m = (qy - origin[1]) / (qx - origin[0])
+        if(qx > origin[0]):
+            qx = frame.shape[1]
+            qy = origin[1] + m*(qx - origin[0])
+        else:
+            qx = 0
+            qy = origin[1] + m*(qx - origin[0])
 
     return (int(qx), int(qy))
 
@@ -197,21 +197,21 @@ def frame_outsides(frame, A, B):
     return selected
 
     
-def caleidoscope(frame, n = 4):
+def caleidoscope(frame, n):
 
+    if (n < 2):
+        return frame
+    
     frame[:, frame.shape[1] // 2:, :] = cv.flip(frame, 1)[:, frame.shape[1] // 2:, :]
-    q_rot = (n - 2) * 180 / n
+
+    angle = 360 // n
+    q_rot = angle // 2
     origin = (frame.shape[1]//2, frame.shape[0]//2)
     points = [(frame.shape[1]//2, 0)]
 
     for i in range(1,n):
-        points.append(rotate(frame, (frame.shape[1]//2, 0), -i*q_rot))
+        points.append(rotate(frame, (frame.shape[1]//2, 0), -i*angle))
 
-    #cv.line(frame, (frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[0]), (0,0,255), 1)
-    #cv.line(frame, (0, frame.shape[0] // 2), (frame.shape[1], frame.shape[0] // 2), (0,0,255), 1)
-    #cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*2), (0, 0, 255), 2)
-    #cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*4), (0, 0, 255), 2)
-    
     m_tra = np.float32([[1,0,0], [0,1,-frame.shape[0]//2]])
     frame = cv.warpAffine(frame, m_tra, (frame.shape[1], frame.shape[0]))
 
@@ -225,32 +225,6 @@ def caleidoscope(frame, n = 4):
         new_frame = cv.bitwise_or(new_frame, cv.bitwise_and(region_frame, mask))
     return new_frame
 
-    # R1
-    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot, 1.0 )
-    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
-    #mask_points = [origin, points[0], (0,0), points[1]]
-    #mask = np.zeros_like(frame)
-    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
-    #r1 = cv.bitwise_and(region_frame, mask)
-#
-    ## R2
-    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*3, 1.0 )
-    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
-    #mask_points = [origin, points[1], (0, frame.shape[0]), (frame.shape[1], frame.shape[0]), points[2]]
-    #mask = np.zeros_like(frame)
-    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
-    #r2 = cv.bitwise_and(region_frame, mask)
-#
-    ## R3
-    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*5, 1.0 )
-    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
-    #mask_points = [origin, points[2], (frame.shape[1], 0), points[0]]
-    #mask = np.zeros_like(frame)
-    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
-    #r3 = cv.bitwise_and(region_frame, mask)
-    #
-    #frame = np.zeros_like(frame)
-    #return cv.bitwise_or(cv.bitwise_or(cv.bitwise_or(frame, r1), r2), r3)
 
 # =============================================================================
 # Main
@@ -324,8 +298,8 @@ options_canvas.create_window(320, 275, anchor=tk.NW, window=bar_neon_threshold)
 # -- Caleidoscope
 caleidoscope_option = tk.Radiobutton(options_canvas, text='Caleidoscopio', width=25,value=8, variable=selected_effect)
 options_canvas.create_window(260, 355, anchor=tk.NW, window=caleidoscope_option)
-
-
+bar_ncaleidoscope = tk.Scale(options_canvas, variable=tk.IntVar(value=0), from_=0, to=15, length=245, orient=tk.HORIZONTAL, state='disabled', troughcolor=disabled_color, label='Ejes')
+options_canvas.create_window(320, 385, anchor=tk.NW, window=bar_ncaleidoscope)
 #-- Ecualizacion de histograma
 equalize_option = tk.Radiobutton(options_canvas, text='Ecualizacion de histograma',width=25, value=2, variable=selected_effect)
 options_canvas.create_window(-2, 180, anchor=tk.NW, window=equalize_option)
@@ -371,6 +345,7 @@ def reset_values():
     bar_pixelize.set(0)
     bar_neon_sigma.set(0)
     bar_neon_threshold.set(0)
+    bar_ncaleidoscope.set(0)
 
 button_reset = tk.Button(options_canvas, text="Reiniciar", command=reset_values)
 options_canvas.create_window(265, 20, anchor=tk.NW, window=button_reset)
@@ -395,6 +370,8 @@ def disable_option(n):
     elif (n == 7):
         bar_neon_sigma.config(state='disabled', troughcolor=disabled_color)
         bar_neon_threshold.config(state='disabled', troughcolor=disabled_color)
+    elif (n == 8):
+        bar_ncaleidoscope.config(state='disabled', troughcolor=disabled_color)
         
 def effects(frame):
     global previous_effect
@@ -437,8 +414,9 @@ def effects(frame):
         bar_neon_threshold.config(state='normal', troughcolor=enabled_color)
         frame = neon_borders(frame, bar_neon_sigma.get(), bar_neon_threshold.get())
     elif (n == 8):
-        frame = caleidoscope(frame)
-        
+        bar_ncaleidoscope.config(state='normal', troughcolor=enabled_color)
+        frame = caleidoscope(frame, bar_ncaleidoscope.get())
+
     previous_effect = n
     return frame
 
