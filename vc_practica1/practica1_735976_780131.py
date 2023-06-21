@@ -1,5 +1,6 @@
 from PIL import Image, ImageTk
 import cv2 as cv
+import math
 import numpy as np
 import tkinter as tk
 # =============================================================================
@@ -146,6 +147,111 @@ def neon_borders(frame, sigma, threshold):
     _, mod = cv.threshold(np.sqrt(gX**2 + gY**2).astype(np.uint8), threshold, 255, cv.THRESH_BINARY)
     return cv.bitwise_and(frame, frame, mask=mod)
 
+
+a = True
+
+
+def rotate(frame, point, deg) :
+
+    rad = math.radians(deg)
+    origin = (frame.shape[1]//2, frame.shape[0]//2)
+    px, py = (point[0] - origin[0], point[1] - origin[1])
+
+    qx = px*math.cos(rad) - py*math.sin(rad) + origin[0]
+    qy = px*math.sin(rad) + py*math.cos(rad) + origin[1]
+
+    print(origin, qx, qy)
+
+    m = (qy - origin[1]) / (qx - origin[0])
+    if(qx > origin[0]):
+        qx = frame.shape[1]
+        qy = origin[1] + m*(qx - origin[0])
+    else:
+        qx = 0
+        qy = origin[1] + m*(qx - origin[0])
+
+    return (int(qx), int(qy))
+
+
+def frame_outsides(frame, A, B):
+    outsides = [(0,0), (0, frame.shape[0]), (frame.shape[1], frame.shape[0]), (frame.shape[1], 0)]
+    selected = []
+    if (A[1] == 0):
+        if (B[0] == 0):
+            selected = [outsides[0]]
+        elif (B[1] == frame.shape[0]):
+            selected = [outsides[0], outsides[1]]
+    elif (A[0] == 0):
+        if (B[1] == frame.shape[0]):
+            selected = [outsides[1]]
+        elif (B[0] == frame.shape[1]):
+            selected = [outsides[1], outsides[2]]
+    elif (A[1] == frame.shape[0]):
+        if (B[0] == frame.shape[1]):
+            selected = [outsides[2]]
+        elif (B[1] == 0):
+            selected = [outsides[2], outsides[3]]
+    elif (A[0] == frame.shape[1]):
+        if (B[1] == 0):
+            selected = [outsides[3]]
+    return selected
+
+    
+def caleidoscope(frame, n = 4):
+
+    frame[:, frame.shape[1] // 2:, :] = cv.flip(frame, 1)[:, frame.shape[1] // 2:, :]
+    q_rot = (n - 2) * 180 / n
+    origin = (frame.shape[1]//2, frame.shape[0]//2)
+    points = [(frame.shape[1]//2, 0)]
+
+    for i in range(1,n):
+        points.append(rotate(frame, (frame.shape[1]//2, 0), -i*q_rot))
+
+    #cv.line(frame, (frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[0]), (0,0,255), 1)
+    #cv.line(frame, (0, frame.shape[0] // 2), (frame.shape[1], frame.shape[0] // 2), (0,0,255), 1)
+    #cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*2), (0, 0, 255), 2)
+    #cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*4), (0, 0, 255), 2)
+    
+    m_tra = np.float32([[1,0,0], [0,1,-frame.shape[0]//2]])
+    frame = cv.warpAffine(frame, m_tra, (frame.shape[1], frame.shape[0]))
+
+    new_frame = np.zeros_like(frame)
+    for i in range(n):
+        m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*(1+2*i), 1.0)
+        region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+        mask_points  = [origin, points[i]] + frame_outsides(frame, points[i], points[(i+1)%n]) + [points[(i+1)%n]]
+        mask         = np.zeros_like(frame)
+        cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255, 255, 255))
+        new_frame = cv.bitwise_or(new_frame, cv.bitwise_and(region_frame, mask))
+    return new_frame
+
+    # R1
+    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot, 1.0 )
+    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    #mask_points = [origin, points[0], (0,0), points[1]]
+    #mask = np.zeros_like(frame)
+    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    #r1 = cv.bitwise_and(region_frame, mask)
+#
+    ## R2
+    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*3, 1.0 )
+    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    #mask_points = [origin, points[1], (0, frame.shape[0]), (frame.shape[1], frame.shape[0]), points[2]]
+    #mask = np.zeros_like(frame)
+    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    #r2 = cv.bitwise_and(region_frame, mask)
+#
+    ## R3
+    #m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*5, 1.0 )
+    #region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    #mask_points = [origin, points[2], (frame.shape[1], 0), points[0]]
+    #mask = np.zeros_like(frame)
+    #cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    #r3 = cv.bitwise_and(region_frame, mask)
+    #
+    #frame = np.zeros_like(frame)
+    #return cv.bitwise_or(cv.bitwise_or(cv.bitwise_or(frame, r1), r2), r3)
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -174,8 +280,8 @@ enabled_color  = rgb_to_hex(180,180,180)
 images_frame = tk.Frame(root)
 images_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-source_image = tk.Label(images_frame)
-source_image.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+#source_image = tk.Label(images_frame)
+#source_image.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 #source_image.grid(row=1,column=2,sticky='nswe')
 # - Output image
 #right_container = tk.Frame(root, bg="blue")
@@ -208,7 +314,6 @@ pixelize_option = tk.Radiobutton(options_canvas, text='Pixelizar', width=25, val
 options_canvas.create_window(240, 50, anchor=tk.NW, window=pixelize_option)
 bar_pixelize    = tk.Scale(options_canvas, variable=tk.IntVar(value=0.0), from_=0, to=50, label='Factor de pixelización', length=245, orient=tk.HORIZONTAL, state='disabled', troughcolor=disabled_color)
 options_canvas.create_window(320, 85, anchor=tk.NW, window=bar_pixelize)
-
 # -- Neon borders
 neon_option = tk.Radiobutton(options_canvas, text='Bordes de neon', width=25,value=7, variable=selected_effect)
 options_canvas.create_window(260, 180, anchor=tk.NW, window=neon_option)
@@ -216,6 +321,10 @@ bar_neon_sigma = tk.Scale(options_canvas, variable=tk.IntVar(value=0), from_=0, 
 options_canvas.create_window(320, 210, anchor=tk.NW, window=bar_neon_sigma)
 bar_neon_threshold = tk.Scale(options_canvas, variable=tk.IntVar(value=0), from_=0, to=255, length=245, orient=tk.HORIZONTAL,state='disabled', troughcolor=disabled_color, label='Threshold')
 options_canvas.create_window(320, 275, anchor=tk.NW, window=bar_neon_threshold)
+# -- Caleidoscope
+caleidoscope_option = tk.Radiobutton(options_canvas, text='Caleidoscopio', width=25,value=8, variable=selected_effect)
+options_canvas.create_window(260, 355, anchor=tk.NW, window=caleidoscope_option)
+
 
 #-- Ecualizacion de histograma
 equalize_option = tk.Radiobutton(options_canvas, text='Ecualizacion de histograma',width=25, value=2, variable=selected_effect)
@@ -237,7 +346,6 @@ bar_clusters = tk.Scale(options_canvas, from_=0, to=150, length=255, orient=tk.H
 options_canvas.create_window(34, 460, anchor=tk.NW, window=bar_clusters)
 checkbox_more_precission = tk.Checkbutton(root, text="Más precisión", variable=more_precission, state='disabled')
 options_canvas.create_window(32, 530, anchor=tk.NW, window=checkbox_more_precission)
-
 # -- Distorsion
 distorsion_option = tk.Radiobutton(options_canvas, text='Distorsion', width=25,value=5, variable=selected_effect)
 options_canvas.create_window(-50, 570, anchor=tk.NW, window=distorsion_option)
@@ -328,11 +436,14 @@ def effects(frame):
         bar_neon_sigma.config(state='normal', troughcolor=enabled_color)
         bar_neon_threshold.config(state='normal', troughcolor=enabled_color)
         frame = neon_borders(frame, bar_neon_sigma.get(), bar_neon_threshold.get())
+    elif (n == 8):
+        frame = caleidoscope(frame)
         
     previous_effect = n
     return frame
 
 def update_view():
+
     check, frame = cam.read()
     if (check):
         frame       = cv.flip(cv.resize(frame, (int(frame.shape[1] * 0.85), int(frame.shape[0] * 0.85)), interpolation=cv.INTER_AREA), 1)
@@ -340,15 +451,15 @@ def update_view():
         source      = cv.cvtColor(frame, cv.COLOR_BGR2RGB,1)
         img_frame   = Image.fromarray(source)
         imgtk_frame = ImageTk.PhotoImage(image=img_frame)
-        source_image.imgtk = imgtk_frame
-        source_image.configure(image=imgtk_frame)
+        #source_image.imgtk = imgtk_frame
+        #source_image.configure(image=imgtk_frame)
         # Output image:
         output      = cv.cvtColor(effects(frame), cv.COLOR_BGR2RGB,1)
         img_frame   = Image.fromarray(output)
         imgtk_frame = ImageTk.PhotoImage(image=img_frame)
         output_image.imgtk = imgtk_frame
         output_image.configure(image=imgtk_frame)
-    source_image.after(20, update_view)
+    output_image.after(20, update_view)
 
 # Main loop
 update_view()
