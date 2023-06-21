@@ -8,18 +8,46 @@ from tkinter import filedialog
 def clip(frame):
     return np.clip(frame, 0, 255).astype(np.uint8)
 
-def Sobel_Scharr(frame):
+def Sobel(frame):
     frame = cv.cvtColor(clip(cv.GaussianBlur(frame,(3,3),0)), cv.COLOR_BGR2GRAY)
-    gX    = cv.Sobel(frame,cv.CV_64F,1,0,ksize=3)
-    gY    = cv.Sobel(frame,cv.CV_64F,0,1,ksize=3) * -1
-    gXY   = cv.addWeighted(gX, 0.5, gY, 0.5, 0) 
+    kernelx = np.array([-1, 0, 1, -2, 0, 2, -1, 0, 1]).reshape(3,3)
+    kernely = np.array([1, 2, 1, 0, 0, 0, -1, -2, -1]).reshape(3,3)
+    gX = np.zeros(frame.shape, dtype=np.int32)
+    gY = np.zeros(frame.shape, dtype=np.int32)
+    gXY = np.zeros(frame.shape, dtype=np.int32)
+    height, width = frame.shape
+    for i in range(height - 1) :
+        for j in range(width - 1) :
+            # Set output to 0 if the 3x3 receptive field is out of bound.
+            if ((i < 1) | (i > height - 2) | (j < 1) | (j > width - 2)) :
+                gX[i][j] = 0
+                gY[i][j] = 0
+                gXY[i][j] = 0
+            else :
+
+                # Apply the sobel filter at the current "receptive field".
+                gx_sum = 0
+                gy_sum = 0
+                for m in range(-1, 2) :
+                    for n in range(-1, 2) :
+                        pixel = frame[i + m][j + n]
+                        gx_sum += pixel * kernelx[m + 1][n + 1]
+                        gy_sum += pixel * kernely[m + 1][n + 1]
+                sum = gx_sum + gy_sum
+
+                gX[i][j] = gx_sum
+                gY[i][j] = gy_sum
+                gXY[i][j] = sum
+
+    #gXY   = cv.addWeighted(gX, 0.5, gY, 0.5, 0)
+    print(np.min(gX), " ", np.max(gX))
     mod   = clip(np.sqrt(gX**2 + gY**2))
     ori   = np.arctan2(gY, gX)
     return gX, gY, gXY, mod, ori
 
 # https://towardsdatascience.com/canny-edge-detection-step-by-step-in-python-computer-vision-b49c3a2d8123
 def Canny(frame, low_threshold_ratio = 0.05, high_threshold_ratio = 0.09):
-    _, _, _, mod, ori = Sobel_Scharr(frame)
+    _, _, _, mod, ori = Sobel(frame)
 
     # Supresion de no maximos
     res = np.zeros(mod.shape, dtype=np.int32)
@@ -85,16 +113,17 @@ def Hough_transform(gradient, orientation, threshold):
     horizon = np.zeros(M)
     for i in range(N-1):
         for j in range(M-1):
-            if (gradient[i,j] >= threshold):
+            theta = orientation[i,j]
+            if ((gradient[i,j] >= threshold) and ((np.abs(theta) > 1e-6) and (np.abs(theta - np.pi/2) > 1e-6) 
+                                             and (np.abs(theta - np.pi) > 1e-6) and (np.abs(theta - (np.pi * (2/3)) > 1e-6)))):
                 # Transformamos las coordenadas para que esten en el centro de 
                 # la imagen:
                 x = j - CN; y = CM - i
                 # Calculamos las coordenadas polares:
-                theta = orientation[i,j]
-                rho   = x*np.cos(theta) + y*np.sin(theta)
+                rho = x*np.cos(theta) + y*np.sin(theta)
                 # Coordenadas polares del horizonte: (pi/2, N/2)
-                if ((theta - np.pi/2) < 1e-6 and (rho - CN) < 1e-6):
-                    horizon[x + CN] += 1
+                ## Calcular intersección
+                # horizon[x + CN] += 1 
 
     return [np.argmax(horizon), CN]
 
@@ -210,7 +239,7 @@ def update_view():
         source = cv.cvtColor(resize_frame(frame, 0.35), cv.COLOR_BGR2RGB,1)
         conf_label(sources[0], source)
 
-        gX, gY, gXY, mod, rad = Sobel_Scharr(frame)
+        gX, gY, gXY, mod, rad = Sobel(frame)
         fuga_sobel = Hough_transform(mod, rad, 255)
 
         if (gX_preview.get()):
