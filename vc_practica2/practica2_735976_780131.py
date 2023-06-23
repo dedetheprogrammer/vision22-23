@@ -4,9 +4,71 @@ import math
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
+from scipy.signal import convolve2d
+
+img_name = ""
 
 def clip(frame):
     return np.clip(frame, 0, 255).astype(np.uint8)
+
+def gaussian(size, sigma):
+    values = np.arange(int(-size/2),int(size/2)+1,1)
+    gauss = np.zeros(size)
+    gaussd = np.zeros(size)
+    for i in range(size) :
+        gauss[i] = math.exp(-(values[i]**2)/(2*(sigma**2)))
+        gaussd[i] = (-values[i]/(sigma**2))*math.exp(-(values[i]**2)/(2*(sigma**2)))
+    return gauss, gaussd
+
+def canny(frame):
+    frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    size = 5
+    sigma = 1
+    gauss, gaussd = gaussian(size, sigma)
+    k = sum([x for x in gauss if x > 0])
+    kd = sum([x for x in gaussd if x > 0])
+
+    gX_aux = np.zeros(frame.shape, dtype=np.int32)
+    gX = np.zeros(frame.shape, dtype=np.int32)
+    gY_aux = np.zeros(frame.shape, dtype=np.int32)
+    gY = np.zeros(frame.shape, dtype=np.int32)
+    gXY = np.zeros(frame.shape, dtype=np.int32)
+    height, width = frame.shape
+    kernelv_x = np.transpose(gauss[np.newaxis])# / k
+    kernelv_y = np.transpose(gaussd[np.newaxis])# / kd
+    frame_v = np.pad(frame, ((2,2), (0,0)), mode='constant')
+    for i in range(height) :
+        for j in range(width) :
+            gx_sum = 0
+            gy_sum = 0
+            for m in range(-int(size/2), int(size/2) + 1) :
+                pixel = frame_v[i+2 + m,j]
+                gx_sum += pixel * kernelv_x[m + int(size/2),0]
+                gy_sum += pixel * kernelv_y[m + int(size/2),0]
+
+            gX_aux[i,j] = gx_sum
+            gY_aux[i,j] = gy_sum
+    
+    kernelh_x = (gaussd[::-1][np.newaxis])# / kd
+    kernelh_y = (gauss[np.newaxis])# / k
+    frame_h_gx = np.pad(gX_aux, ((0,0), (2,2)), mode='constant')
+    frame_h_gy = np.pad(gY_aux, ((0,0), (2,2)), mode='constant')
+    for i in range(height - 1) :
+        for j in range(width - 1) :
+            gx_sum = 0
+            gy_sum = 0
+            for m in range(-int(size/2), int(size/2) + 1) :
+                #pixel = frame_v[i][j+2 + m]
+                gx_sum += frame_h_gx[i,j+int(size/2) + m] * kernelh_x[0,m + int(size/2)]
+                gy_sum += frame_h_gy[i,j+int(size/2) + m] * kernelh_y[0,m + int(size/2)]
+
+            gX[i,j] = gx_sum
+            gY[i,j] = gy_sum
+    gXY = gX + gY
+    mod   = clip(np.sqrt(gX**2 + gY**2))
+    ori   = np.arctan2(gY, gX)
+    return gX, gY, gXY, mod, ori
+
 
 def Sobel(frame):
     frame = cv.cvtColor(clip(cv.GaussianBlur(frame,(3,3),0)), cv.COLOR_BGR2GRAY)
@@ -20,9 +82,9 @@ def Sobel(frame):
         for j in range(width - 1) :
             # Set output to 0 if the 3x3 receptive field is out of bound.
             if ((i < 1) | (i > height - 2) | (j < 1) | (j > width - 2)) :
-                gX[i][j] = 0
-                gY[i][j] = 0
-                gXY[i][j] = 0
+                gX[i,j] = 0
+                gY[i,j] = 0
+                gXY[i,j] = 0
             else :
 
                 # Apply the sobel filter at the current "receptive field".
@@ -30,102 +92,46 @@ def Sobel(frame):
                 gy_sum = 0
                 for m in range(-1, 2) :
                     for n in range(-1, 2) :
-                        pixel = frame[i + m][j + n]
-                        gx_sum += pixel * kernelx[m + 1][n + 1]
-                        gy_sum += pixel * kernely[m + 1][n + 1]
+                        pixel = frame[i + m,j + n]
+                        gx_sum += pixel * kernelx[m + 1,n + 1]
+                        gy_sum += pixel * kernely[m + 1,n + 1]
                 sum = gx_sum + gy_sum
 
-                gX[i][j] = gx_sum
-                gY[i][j] = gy_sum
-                gXY[i][j] = sum
-
-    #gXY   = cv.addWeighted(gX, 0.5, gY, 0.5, 0)
-    print(np.min(gX), " ", np.max(gX))
+                gX[i,j] = gx_sum
+                gY[i,j] = gy_sum
+    gXY = gX + gY
     mod   = clip(np.sqrt(gX**2 + gY**2))
     ori   = np.arctan2(gY, gX)
     return gX, gY, gXY, mod, ori
 
-# https://towardsdatascience.com/canny-edge-detection-step-by-step-in-python-computer-vision-b49c3a2d8123
-def Canny(frame, low_threshold_ratio = 0.05, high_threshold_ratio = 0.09):
-    _, _, _, mod, ori = Sobel(frame)
-
-    # Supresion de no maximos
-    res = np.zeros(mod.shape, dtype=np.int32)
-    ori_dgr = ori * 180. / np.pi
-    ori_dgr[ori_dgr < 0] += 180
-    q = np.where(
-        (0 <= ori_dgr) & (ori_dgr < 22.5) | (157.5 <= ori_dgr) & (ori_dgr <= 180),
-        np.roll(mod, shift=-1, axis=1),                 # q = mod[i, j+1]
-        np.where(
-            (22.5 <= ori_dgr) & (ori_dgr < 67.5),
-            np.roll(mod, shift=(1, -1), axis=(0, 1)),   # q = mod[i+1, j-1]
-            np.where(
-                (67.5 <= ori_dgr) & (ori_dgr < 112.5),
-                np.roll(mod, shift=-1, axis=0),         # q = mod[i+1, j]
-                np.roll(mod, shift=(1,1), axis=(0,1))   # q = mod[i+1, j+1]
-            )
-        )
-    )
-    r = np.where(
-        (0 <= ori_dgr) & (ori_dgr < 22.5) | (157.5 <= ori_dgr) & (ori_dgr <= 180),
-        np.roll(mod, shift=1, axis=1),                  # r = mod[i, j-1]
-        np.where(
-            (22.5 <= ori_dgr) & (ori_dgr < 67.5),
-            np.roll(mod, shift=(-1,1), axis=(0,1)),     # r = mod[i-1, j+1]
-            np.where(
-                (67.5 <= ori_dgr) & (ori_dgr < 112.5),
-                np.roll(mod, shift=1, axis=0),          # r = mod[i-1, j]
-                np.roll(mod, shift=(-1,-1), axis=(0,1)) # r = mod[i-1, j-1]
-            )
-        )
-    )
-    res[(mod >= q) & (mod >= r)] = mod[(mod >= q) & (mod >= r)]
-
-    # Double threshold
-    low_threshold  = res.min() * low_threshold_ratio
-    high_threshold = res.max() * high_threshold_ratio
-    weak   = np.int32(25) ; weak_i  , weak_j   = np.where((res <= high_threshold) & (res >= low_threshold))
-    strong = np.int32(255); strong_i, strong_j = np.where(res >= high_threshold)
-
-    res[weak_i  , weak_j] = weak
-    res[strong_i, strong_j] = strong
-    
-    # Hysteresis
-    #M, N = res.shape  
-    #for i in range(1, M-1):
-    #    for j in range(1, N-1):
-    #        if (res[i,j] == weak):
-    #            try:
-    #                if ((res[i+1, j-1] == strong) or (res[i+1, j] == strong) or (res[i+1, j+1] == strong)
-    #                    or (res[i, j-1] == strong) or (res[i, j+1] == strong)
-    #                    or (res[i-1, j-1] == strong) or (res[i-1, j] == strong) or (res[i-1, j+1] == strong)):
-    #                    res[i, j] = strong
-    #                else:
-    #                    res[i, j] = 0
-    #            except IndexError as e:
-    #                pass
-    return res, ori
-
 # https://opencv24-python-tutorials.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghlines/py_houghlines.html
 def Hough_transform(gradient, orientation, threshold):
 
-    N,M = gradient.shape; CM = int(M/2); CN = int(N/2)
-    horizon = np.zeros(M)
-    for i in range(N-1):
-        for j in range(M-1):
+    height, width = gradient.shape
+    central_y = int(height / 2)
+    central_x = int(width / 2)
+    if(img_name == 'pasillo1.pgm') :
+        central_y -= 50
+    horizon = np.zeros(width)
+    for i in range(height-1):
+        for j in range(width-1):
             theta = orientation[i,j]
-            if ((gradient[i,j] >= threshold) and ((np.abs(theta) > 1e-6) and (np.abs(theta - np.pi/2) > 1e-6) 
-                                             and (np.abs(theta - np.pi) > 1e-6) and (np.abs(theta - (np.pi * (2/3)) > 1e-6)))):
-                # Transformamos las coordenadas para que esten en el centro de 
-                # la imagen:
-                x = j - CN; y = CM - i
-                # Calculamos las coordenadas polares:
+            if ((gradient[i,j] >= threshold) and 
+                ((np.abs(theta) > np.radians(5)) and (np.abs(theta - np.pi/2) > np.radians(5)) and
+                 (np.abs(theta - np.pi) > np.radians(5)) and (np.abs(theta - (np.pi * (2/3)) > np.radians(5))) and
+                 (np.abs(theta - 2*np.pi) > np.radians(5)))):
+                x = j - central_x
+                y = central_y - i
                 rho = x*np.cos(theta) + y*np.sin(theta)
-                # Coordenadas polares del horizonte: (pi/2, N/2)
+                vote_x = int((rho / np.cos(theta) + central_x))
                 ## Calcular intersección
-                # horizon[x + CN] += 1 
+                if((vote_x >= 0) and (vote_x < width)) :
+                    horizon[vote_x] += 1
+                #for k in range(width) :
+                #    if((np.abs(theta) < (np.abs(orientation[central_y,k]) + np.pi/36)) and (np.abs(theta) > (np.abs(orientation[central_y,k]) - np.pi/36))):
+                #        horizon[k] +=1
 
-    return [np.argmax(horizon), CN]
+    return [np.argmax(horizon), central_y]
 
 def pack_frame(root, side, fill, expand):
     new_frame = tk.Frame(root)
@@ -201,23 +207,30 @@ options_canvas.create_window(90, 80, anchor=tk.NW, window=btn_1)
 
 gX_preview   = tk.BooleanVar()
 gY_preview   = tk.BooleanVar()
-g_XY_preview   = tk.BooleanVar()
+g_XY_preview = tk.BooleanVar()
 rad_preview  = tk.BooleanVar()
 smod_preview = tk.BooleanVar()
-cmod_preview = tk.BooleanVar()
+vanishing_point_preview = tk.BooleanVar()
+selected_operator = tk.IntVar(value=1)
 
+text_preview = tk.Label(root, text="Elegir operador")
+options_canvas.create_window(90, 140, anchor=tk.NW, window=text_preview)
+option1_checkbox = tk.Radiobutton(root, text="Sobel", variable=selected_operator, value=1)
+options_canvas.create_window(110, 180, anchor=tk.NW, window=option1_checkbox)
+option2_checkbox = tk.Radiobutton(root, text="Canny", variable=selected_operator, value=2)
+options_canvas.create_window(110, 220, anchor=tk.NW, window=option2_checkbox)
 checkbox_gX_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en X", variable=gX_preview)
-options_canvas.create_window(90, 140, anchor=tk.NW, window=checkbox_gX_preview)
+options_canvas.create_window(90, 320, anchor=tk.NW, window=checkbox_gX_preview)
 checkbox_gY_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en Y", variable=gY_preview)
-options_canvas.create_window(90, 200, anchor=tk.NW, window=checkbox_gY_preview)
+options_canvas.create_window(90, 380, anchor=tk.NW, window=checkbox_gY_preview)
 checkbox_gY_preview = tk.Checkbutton(root, text="Habilitar vista: gradiente en XY", variable=g_XY_preview)
-options_canvas.create_window(90, 260, anchor=tk.NW, window=checkbox_gY_preview)
+options_canvas.create_window(90, 440, anchor=tk.NW, window=checkbox_gY_preview)
 checkbox_rad_preview = tk.Checkbutton(root, text="Habilitar vista: orientación", variable=rad_preview)
-options_canvas.create_window(90, 320, anchor=tk.NW, window=checkbox_rad_preview)
-checkbox_smod_preview = tk.Checkbutton(root, text="Habilitar vista: modulo de Sobel", variable=smod_preview)
-options_canvas.create_window(90, 380, anchor=tk.NW, window=checkbox_smod_preview)
-checkbox_cmod_preview = tk.Checkbutton(root, text="Habilitar modulo de Canny", variable=cmod_preview)
-options_canvas.create_window(90, 440, anchor=tk.NW, window=checkbox_cmod_preview)
+options_canvas.create_window(90, 500, anchor=tk.NW, window=checkbox_rad_preview)
+checkbox_smod_preview = tk.Checkbutton(root, text="Habilitar vista: modulo", variable=smod_preview)
+options_canvas.create_window(90, 560, anchor=tk.NW, window=checkbox_smod_preview)
+checkbox_vanishing_point_preview = tk.Checkbutton(root, text="Punto de fuga", variable=vanishing_point_preview)
+options_canvas.create_window(90, 620, anchor=tk.NW, window=checkbox_vanishing_point_preview)
 
 cam   = cv.VideoCapture(0)
 frame = cam.read()[1]; path_image = None
@@ -226,6 +239,7 @@ def update_view():
     global using_camera
     global path_image
     global frame
+    global img_name
 
     if (using_camera):
         _, frame = cam.read()
@@ -233,14 +247,25 @@ def update_view():
     else:
         if (not path_image == None):
             frame = cv.imread(path_image)
+            char = "/"
+            last_index = path_image.rindex(char)
+            substring = path_image[last_index + 1:]
+            img_name = substring
 
     # Source image:
     if (using_camera or (not using_camera and not path_image == None)):
         source = cv.cvtColor(resize_frame(frame, 0.35), cv.COLOR_BGR2RGB,1)
         conf_label(sources[0], source)
-
-        gX, gY, gXY, mod, rad = Sobel(frame)
-        fuga_sobel = Hough_transform(mod, rad, 255)
+        
+        gX = np.zeros(frame.shape, dtype=np.int32)
+        gY = np.zeros(frame.shape, dtype=np.int32)
+        gXY = np.zeros(frame.shape, dtype=np.int32)
+        mod = np.zeros(frame.shape, dtype=np.int32)
+        rad = np.zeros(frame.shape, dtype=np.int32)
+        if(selected_operator.get() == 1):
+            gX, gY, gXY, mod, rad = Sobel(frame)
+        else:
+            gX, gY, gXY, mod, rad = canny(frame)
 
         if (gX_preview.get()):
             conf_label(sources[0], resize_frame(clip(gX/2+128),0.35))
@@ -267,17 +292,14 @@ def update_view():
         else:
             conf_label(sources[4], blank)
         # Output image:
-        if (cmod_preview.get()):
-            mod, rad = Canny(frame, 0.05, 0.06)
-            fuga_canny = Hough_transform(mod, rad, 100)
+        if (vanishing_point_preview.get()):
+            vanishing_point = Hough_transform(mod, rad, 100)
             conf_label(sources[5], resize_frame(clip(mod),0.35))
-            cv.line(frame, (fuga_canny[0], fuga_canny[1]-10), (fuga_canny[0], fuga_canny[1]+10), (255,0,255), 2)
-            cv.line(frame, (fuga_canny[0]-10, fuga_canny[1]), (fuga_canny[0]+10, fuga_canny[1]), (255,0,255), 2)
+            cv.line(frame, (vanishing_point[0], vanishing_point[1]-10), (vanishing_point[0], vanishing_point[1]+10), (255,0,255), 2)
+            cv.line(frame, (vanishing_point[0]-10, vanishing_point[1]), (vanishing_point[0]+10, vanishing_point[1]), (255,0,255), 2)
         else:
             conf_label(sources[5], blank)
 
-        cv.line(frame, (fuga_sobel[0], fuga_sobel[1]-10), (fuga_sobel[0], fuga_sobel[1]+10), (255,0,0), 2)
-        cv.line(frame, (fuga_sobel[0]-10, fuga_sobel[1]), (fuga_sobel[0]+10, fuga_sobel[1]), (255,0,0), 2)
         output = cv.cvtColor(frame, cv.COLOR_BGR2RGB,1)
         for i in outputs:
             conf_label(i, np.uint8(output))
@@ -285,4 +307,13 @@ def update_view():
 
 update_view()
 root.mainloop()
+#gauss, gaussd = gaussian(5, 1)
+#k = sum([x for x in gauss if x > 0])
+#kd = sum([x for x in gaussd if x > 0])
+#print(np.transpose(gaussd[np.newaxis]))
+#print(np.transpose(gaussd[np.newaxis]) / 2)
+
+
+#print(gaussd[::-1][np.newaxis])
+
 cam.release()
