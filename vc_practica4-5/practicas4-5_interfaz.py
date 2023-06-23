@@ -1,5 +1,6 @@
 import cv2 as cv
 import numpy as np
+import random
 import time
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -48,7 +49,7 @@ def ORB(img, get_output):
 # https://docs.opencv.org/4.x/db/d70/tutorial_akaze_matching.html
 def AKAZE(img, get_output):
     grayscale = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    akaze     = cv.AKAZE_create()
+    akaze     = cv.AKAZE_create(threshold=akaze_threshold)
     kp, des   = akaze.detectAndCompute(grayscale, None)
     if get_output:
         return kp, des, cv.drawKeypoints(img, kp, None, color=(0,255,0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
@@ -110,7 +111,9 @@ def FLANN_MATCH(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output, FLANN_IN
     index_params  = dict(algorithm=FLANN_INDEX_KDTREE, trees=trees)
     search_params = dict(checks=checks)
     flann         = cv.FlannBasedMatcher(index_params, search_params)
-    matches       = flann.knnMatch(fst_des, snd_des, k=k)
+    print(type(fst_des))
+    print(type(snd_des))
+    matches       = flann.knnMatch(fst_des.astype(np.uint8), snd_des.astype(np.uint8), k=k)
     good          = []
     for m,n in matches:
         if m.distance < ratio*n.distance:
@@ -244,19 +247,29 @@ def crop(panorama):
     return panorama[y:y+h, x:x+w]
 
 # https://courses.cs.washington.edu/courses/cse576/16sp/Slides/10_ImageStitching.pdf
-def homography_ransac(src_pts, dst_pts, iterations, threshold):
-    
+def homography_ransac(src_pts, dst_pts, threshold, min_prob=0.99, min_empty_iterations=2000):
     best_H = None
     best_inliers = []
+    num_iterations = 0
+    num_empty_iterations = 0
+    p = 0.5  # Probabilidad inicial
     
-    for i in range(iterations):
+    while p < min_prob and num_empty_iterations < min_empty_iterations :
+        num_iterations += 1
         # Choose four random matches
+        sample = []
+        if len(src_pts) < 4:
+            break
         sample = np.random.choice(len(src_pts), 4, replace=False)
+        #sample = random.sample(range(len(src_pts)), 4)
         
         # Compute homography using normalized DLT
         H = cv.findHomography(src_pts[sample], dst_pts[sample])[0]
         
         # Project points from source to destination
+        if type(H) == type(None) :
+            num_empty_iterations += 1
+            continue
         projected_pts = cv.perspectiveTransform(src_pts, H)
         
         # Compute reprojection error
@@ -267,10 +280,19 @@ def homography_ransac(src_pts, dst_pts, iterations, threshold):
         if len(inliers) > len(best_inliers):
             best_H = H
             best_inliers = inliers
-    
+            print("Mejores inliers: ", len(inliers))
+            num_empty_iterations = 0
+        else:
+            num_empty_iterations += 1
+        
+        # Update probability p
+        p = len(inliers) / len(src_pts)
+    print("Ransac iterations: ", num_iterations)
     # Compute final homography using all inliers
     if len(best_inliers) >= 4:
         best_H = cv.findHomography(src_pts[best_inliers], dst_pts[best_inliers])[0]
+    else :
+        print("Fail")
     
     return best_H
 
@@ -288,39 +310,53 @@ def ImageStitching(fst, snd, md, feature_matcher, get_output = False):
     matches, matching_img = feature_matcher(fst, fst_kp, fst_des, snd, snd_kp, snd_des, get_output)
     tm1     = time.time() - tm0
 
-    # 3. Wrapping
+    # 3. Wrapping 
     src_pts = np.float32([fst_kp[match.queryIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
     dst_pts = np.float32([snd_kp[match.trainIdx].pt for match in matches[:200]]).reshape(-1, 1, 2)
     #M, _ = cv.findHomography(dst_pts, src_pts, cv.RANSAC, 5.0)
-    M = homography_ransac(dst_pts, src_pts, 2000, 3.0)
-    h1, w1 = fst.shape[:2]
-    h2, w2 = snd.shape[:2]
-    pts1 = np.float32([[0, 0], [0, h1], [w1, h1], [w1, 0]]).reshape(-1, 1, 2)
-    pts2 = np.float32([[0, 0], [0, h2], [w2, h2], [w2, 0]]).reshape(-1, 1, 2)
-    pts2_ = cv.perspectiveTransform(pts2, M)
-    pts = np.concatenate((pts1, pts2_), axis=0)
-    [xmin, ymin] = np.int32(pts.min(axis=0).ravel() - 0.5)
-    [xmax, ymax] = np.int32(pts.max(axis=0).ravel() + 0.5)
-    t = [-xmin, -ymin]
-    Ht = np.array([[1, 0, t[0]], [0, 1, t[1]], [0, 0, 1]])
+    M = homography_ransac(dst_pts, src_pts, 3.0, 0.99)
+    if type(M) != type(None) :
+        h1, w1 = fst.shape[:2]
+        h2, w2 = snd.shape[:2]
+        pts1 = np.float32([[0, 0], [0, h1], [w1, h1], [w1, 0]]).reshape(-1, 1, 2)
+        pts2 = np.float32([[0, 0], [0, h2], [w2, h2], [w2, 0]]).reshape(-1, 1, 2)
+        pts2_ = cv.perspectiveTransform(pts2, M)
+        pts = np.concatenate((pts1, pts2_), axis=0)
+        [xmin, ymin] = np.int32(pts.min(axis=0).ravel() - 0.5)
+        [xmax, ymax] = np.int32(pts.max(axis=0).ravel() + 0.5)
+        t = [-xmin, -ymin]
+        Ht = np.array([[1, 0, t[0]], [0, 1, t[1]], [0, 0, 1]])
 
-    # 4. Blending
-    aligned_img = cv.warpPerspective(snd, Ht.dot(M), (xmax - xmin, ymax - ymin))
-    mask = fst != 0
-    aligned_img[t[1]:h1 + t[1], t[0]:w1 + t[0]][mask] = fst[mask]
+        # 4. Blending
+        aligned_img = cv.warpPerspective(snd, Ht.dot(M), (xmax - xmin, ymax - ymin))
+        mask = fst != 0
+        aligned_img[t[1]:h1 + t[1], t[0]:w1 + t[0]][mask] = fst[mask]
 
-    # 5. Log output
-    print('========================================================')
-    print(f'Deteccion mediante {md.__name__} y matching mediante {feature_matcher.__name__}')
-    print('========================================================')
-    print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
-    print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
-    print(f'Número de buenos emparejamientos: {len(matches)}')
-    print(f'Tiempo de detección: {td1:.4f} segundos')
-    print(f'Tiempo de matching: {tm1:.4f} segundos')
-    print('========================================================')
-    # 6. Final crop
-    return crop(aligned_img), fst_kp_img, snd_kp_img, matching_img
+        # 5. Log output
+        print('========================================================')
+        print(f'Deteccion mediante {md.__name__} y matching mediante {feature_matcher.__name__}')
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Número de buenos emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección: {td1:.4f} segundos')
+        print(f'Tiempo de matching: {tm1:.4f} segundos')
+        print('========================================================')
+        # 6. Final crop
+        return crop(aligned_img), fst_kp_img, snd_kp_img, matching_img
+
+    else:
+        print('========================================================')
+        print(f'Deteccion mediante {md.__name__} y matching mediante {feature_matcher.__name__}')
+        print('========================================================')
+        print(f'Caracteristicas detectadas en imagen 1: {len(fst_kp)}')
+        print(f'Caracteristicas detectadas en imagen 2: {len(snd_kp)}')
+        print(f'Número de buenos emparejamientos: {len(matches)}')
+        print(f'Tiempo de detección: {td1:.4f} segundos')
+        print(f'Tiempo de matching: {tm1:.4f} segundos')
+        print('========================================================')
+        # 6. Final crop
+        return np.zeros(fst.shape, dtype=np.uint8), fst_kp_img, snd_kp_img, matching_img
 
 # No funciona :( (tampoco esta depurado)
 # Su objetivo era obtener el par con el mejor porcentaje de matching, pero 
@@ -437,13 +473,17 @@ def MultipleImageStitching(images, operator, matcher, threshold):
     return res
 
 changes = True
-prev_choice = 0
+prev_choice = 1
+prev_set = 1
+set_option = 1
 prev_detector = ORB
-prev_matcher = KNN_MATCH
+prev_matcher = 0
 prev_nfeatures = 0
+prev_threshold = 0.01
 detector = AKAZE
 matcher = BRUTE_FORCE_MATCH
 nfeatures = 200
+akaze_threshold = 0.001
 
 root = tk.Tk()
 root.title('Practica 1')
@@ -464,28 +504,52 @@ source_image = tk.Label(images_frame, width=label_width, height=label_height)
 source_image.pack(side=tk.TOP, fill='none', expand=False)
 
 options_canvas = tk.Canvas(root)
-options_canvas.pack(side=tk.LEFT, fill='none', expand=False)
+options_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
 selected_effect = tk.IntVar()
+selected_set = tk.IntVar()
+selected_matcher = tk.IntVar()
 # AKAZE
 akaze_option = tk.Radiobutton(options_canvas, text='AKAZE', width=25,value=1, variable=selected_effect)
-options_canvas.create_window(28, 20, anchor=tk.NW, window=akaze_option)
+options_canvas.create_window(28, 10, anchor=tk.NW, window=akaze_option)
 # ORB
 orb_option = tk.Radiobutton(options_canvas, text='ORB', width=25,value=2, variable=selected_effect)
-options_canvas.create_window(28, 70, anchor=tk.NW, window=orb_option)
+options_canvas.create_window(28, 30, anchor=tk.NW, window=orb_option)
 # SIFT
 sift_option = tk.Radiobutton(options_canvas, text='SIFT', width=25,value=3, variable=selected_effect)
-options_canvas.create_window(28, 120, anchor=tk.NW, window=sift_option)
+options_canvas.create_window(28, 50, anchor=tk.NW, window=sift_option)
+
+# Building
+building_option = tk.Radiobutton(options_canvas, text='Building', width=25,value=1, variable=selected_set)
+options_canvas.create_window(28, 90, anchor=tk.NW, window=building_option)
+# EINA
+eina_option = tk.Radiobutton(options_canvas, text='EINA', width=25,value=2, variable=selected_set)
+options_canvas.create_window(28, 110, anchor=tk.NW, window=eina_option)
+# Poster
+poster_option = tk.Radiobutton(options_canvas, text='Poster', width=25,value=3, variable=selected_set)
+options_canvas.create_window(28, 130, anchor=tk.NW, window=poster_option)
+
+# Brute force
+brute_force_option = tk.Radiobutton(options_canvas, text='Fuerza bruta', width=25,value=1, variable=selected_matcher)
+options_canvas.create_window(28, 170, anchor=tk.NW, window=brute_force_option)
+# KNN
+knn_option = tk.Radiobutton(options_canvas, text='KNN', width=25,value=2, variable=selected_matcher)
+options_canvas.create_window(28, 190, anchor=tk.NW, window=knn_option)
 
 bar_nfeatures = tk.Scale(options_canvas, variable=tk.DoubleVar(value=0), from_=10, to=1000, length=255, resolution=20, orient=tk.HORIZONTAL, label='nfeatures', state='active', troughcolor=enabled_color)
-options_canvas.create_window(28, 170, anchor=tk.NW, window=bar_nfeatures)
+options_canvas.create_window(28, 240, anchor=tk.NW, window=bar_nfeatures)
 
-option = 0
+bar_threshold = tk.Scale(options_canvas, variable=tk.DoubleVar(value=0), from_=0.001, to=0.01, length=255, resolution=0.001, orient=tk.HORIZONTAL, label='Akaze threshold', state='active', troughcolor=enabled_color)
+options_canvas.create_window(28, 310, anchor=tk.NW, window=bar_threshold)
+
 images = []
 
 def stitch(detector, matcher):
-    if option == 0:
+    global set_option, images
+    print(set_option)
+    if (int(set_option) == 1):
         for i in range(1,6):
             img  = cv.imread(f'./BuildingScene/building{i}.JPG')
+            cv.imwrite('imagen{i}.JPG', img)
             h, w = img.shape[:2]
             images.append(cylindricalWarp(img, np.array([[800,0,w/2],[0,800,h/2],[0,0,1]])))
         print('========================================================')
@@ -498,7 +562,8 @@ def stitch(detector, matcher):
         print('========================================================')
         print(f'Tiempo total: {t1} s')
         print('========================================================')
-    else:
+        images = []
+    elif (int(set_option) == 2):
         for i in range(1,8):
             img  = cv.imread(f'./BuildingScene/EINA{i}.jpg')
             img  = cv.resize(img, (int(img.shape[1] * 0.25), int(img.shape[0] * 0.25)), interpolation=cv.INTER_AREA)
@@ -516,17 +581,42 @@ def stitch(detector, matcher):
         print('========================================================')
         print(f'Tiempo total: {t1} s')
         print('========================================================')
+        images = []
+    else :
+        for i in range(1,5):
+            img  = cv.imread(f'./BuildingScene/poster{i}.jpeg')
+            h, w = img.shape[:2]
+            images.append(cylindricalWarp(img, np.array([[800,0,w/2],[0,800,h/2],[0,0,1]])))
+        print('========================================================')
+        t0  = time.time()
+        res1,_,_,_ = ImageStitching(images[1], images[0], detector, matcher)
+        res2,_,_,_ = ImageStitching(res1, images[2], detector, matcher)
+        res,_,_,_ = ImageStitching(res2, images[3], detector, matcher)
+        t1  = time.time() - t0
+        print('========================================================')
+        print(f'Tiempo total: {t1} s')
+        print('========================================================')
+        images = []
     return res
 
 def effects():
-    global changes, prev_choice, prev_nfeatures, detector, matcher, nfeatures
+    global changes, prev_choice, prev_set, prev_matcher, prev_nfeatures, prev_threshold, detector, matcher, nfeatures, akaze_threshold, set_option
     n = selected_effect.get()
+    m = selected_set.get()
     nf = bar_nfeatures.get()
-    if(n != prev_choice):
+    ak = bar_threshold.get()
+    mc = selected_matcher.get()
+    if((n != prev_choice) or (m != prev_set) or (mc != prev_matcher)):
         prev_choice = n
+        prev_set = m
+        set_option = m
         changes = True
+        prev_matcher = mc
     if(nf != prev_nfeatures and (n == 2 or n == 3)):
         prev_nfeatures = nf
+        changes = True
+    if(ak != prev_threshold and (n == 1)):
+        prev_threshold = ak
         changes = True
     if (n == 1):
         detector = AKAZE
@@ -534,6 +624,10 @@ def effects():
         detector = ORB
     elif (n == 3):
         detector = SIFT
+    if (mc == 1):
+        matcher = BRUTE_FORCE_MATCH
+    elif (mc == 2):
+        matcher = KNN_MATCH
 
 def update_view():
     global changes
