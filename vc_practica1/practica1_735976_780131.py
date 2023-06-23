@@ -196,14 +196,53 @@ def frame_outsides(frame, A, B):
             selected = [outsides[3]]
     return selected
 
-    
+def caleidoscope_(frame, n):
+    n = 3
+
+    frame[:, frame.shape[1] // 2:, :] = cv.flip(frame, 1)[:, frame.shape[1] // 2:, :]
+    q_rot = (n - 2) * 180 / n
+    origin = (frame.shape[1]//2, frame.shape[0]//2)
+    points = [(frame.shape[1]//2, 0), rotate(frame, (frame.shape[1]//2,0), -2*q_rot), rotate(frame, (frame.shape[1]//2,0), -4*q_rot)]
+
+    # R1
+    m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot, 1.0 )
+    region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    mask_points = [origin, points[0], (0,0), points[1]]
+    mask = np.zeros_like(frame)
+    cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    r1 = cv.bitwise_and(region_frame, mask)
+
+    # R2
+    m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*3, 1.0 )
+    region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    mask_points = [origin, points[1], (0, frame.shape[0]), (frame.shape[1], frame.shape[0]), points[2]]
+    mask = np.zeros_like(frame)
+    cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    r2 = cv.bitwise_and(region_frame, mask)
+
+    # R3
+    m_rot = cv.getRotationMatrix2D((frame.shape[1]//2, frame.shape[0]//2), q_rot*5, 1.0 )
+    region_frame = cv.warpAffine(frame, m_rot, (frame.shape[1], frame.shape[0]))
+    mask_points = [origin, points[2], (frame.shape[1], 0), points[0]]
+    mask = np.zeros_like(frame)
+    cv.fillPoly(mask, [np.array(mask_points, np.int32)], (255,255,255))
+    r3 = cv.bitwise_and(region_frame, mask)
+
+    frame = np.zeros_like(frame)
+    frame = cv.bitwise_or(cv.bitwise_or(cv.bitwise_or(frame, r1), r2), r3)   
+    cv.line(frame, (frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[0]), (0,0,255), 1)
+    cv.line(frame, (0, frame.shape[0] // 2), (frame.shape[1], frame.shape[0] // 2), (0,0,255), 1)
+    cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*2), (0, 0, 255), 2)
+    cv.line(frame, (frame.shape[1]//2, frame.shape[0]//2), rotate(frame, (frame.shape[1]//2, 0), -q_rot*4), (0, 0, 255), 2)
+    return frame
+
 def caleidoscope(frame, n):
 
     if (n < 2):
         return frame
     
     frame[:, frame.shape[1] // 2:, :] = cv.flip(frame, 1)[:, frame.shape[1] // 2:, :]
-
+    
     angle = 360 // n
     q_rot = angle // 2
     origin = (frame.shape[1]//2, frame.shape[0]//2)
@@ -254,8 +293,8 @@ enabled_color  = rgb_to_hex(180,180,180)
 images_frame = tk.Frame(root)
 images_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-#source_image = tk.Label(images_frame)
-#source_image.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+source_image = tk.Label(images_frame)
+source_image.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 #source_image.grid(row=1,column=2,sticky='nswe')
 # - Output image
 #right_container = tk.Frame(root, bg="blue")
@@ -429,8 +468,8 @@ def update_view():
         source      = cv.cvtColor(frame, cv.COLOR_BGR2RGB,1)
         img_frame   = Image.fromarray(source)
         imgtk_frame = ImageTk.PhotoImage(image=img_frame)
-        #source_image.imgtk = imgtk_frame
-        #source_image.configure(image=imgtk_frame)
+        source_image.imgtk = imgtk_frame
+        source_image.configure(image=imgtk_frame)
         # Output image:
         output      = cv.cvtColor(effects(frame), cv.COLOR_BGR2RGB,1)
         img_frame   = Image.fromarray(output)
