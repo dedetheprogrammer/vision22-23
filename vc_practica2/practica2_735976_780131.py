@@ -116,20 +116,20 @@ def Hough_transform(gradient, orientation, threshold):
     for i in range(height-1):
         for j in range(width-1):
             theta = orientation[i,j]
+            # Además del umbral(threshold), comprobamos que la orientación no sea aproximadamente vertical ni horizontal
             if ((gradient[i,j] >= threshold) and 
                 ((np.abs(theta) > np.radians(5)) and (np.abs(theta - np.pi/2) > np.radians(5)) and
                  (np.abs(theta - np.pi) > np.radians(5)) and (np.abs(theta - (np.pi * (2/3)) > np.radians(5))) and
                  (np.abs(theta - 2*np.pi) > np.radians(5)))):
                 x = j - central_x
                 y = central_y - i
+                # Calculamos la ecuación de la recta con las coordenadas polares
                 rho = x*np.cos(theta) + y*np.sin(theta)
+                # Calculamos la coordenada x de la línea central donde intersecciona
                 vote_x = int((rho / np.cos(theta) + central_x))
-                ## Calcular intersección
+                # Si la x está dentro de la imagen se vota el píxel
                 if((vote_x >= 0) and (vote_x < width)) :
                     horizon[vote_x] += 1
-                #for k in range(width) :
-                #    if((np.abs(theta) < (np.abs(orientation[central_y,k]) + np.pi/36)) and (np.abs(theta) > (np.abs(orientation[central_y,k]) - np.pi/36))):
-                #        horizon[k] +=1
 
     return [np.argmax(horizon), central_y]
 
@@ -289,6 +289,7 @@ def update_view():
 
         if (smod_preview.get()):
             conf_label(sources[4], resize_frame(clip(mod),0.35))
+            cv.imwrite('Sobel_mod.jpg', clip(mod))
         else:
             conf_label(sources[4], blank)
         # Output image:
@@ -301,6 +302,8 @@ def update_view():
             conf_label(sources[5], blank)
 
         output = cv.cvtColor(frame, cv.COLOR_BGR2RGB,1)
+        o_name = img_name + ".jpg"
+        cv.imwrite(o_name, output)
         for i in outputs:
             conf_label(i, np.uint8(output))
     sources[0].after(20, update_view)
